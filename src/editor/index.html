@@ -32,6 +32,8 @@
     <button id="bRedo" title="Redo (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
     <button id="bDel" title="Delete selected (Del)"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
   </div>
+  <div class="grow"></div>
+  <button id="bHelp" title="Keyboard shortcuts (? or F1)"><svg viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg><span>Shortcuts</span></button>
 </header>
 
 <header id="tools">
@@ -51,10 +53,10 @@
   </div>
   <div class="sep"></div>
   <div class="grp props">
-    <label title="Line / border / outline colour">Line <input type="color" id="pStroke" value="#ff0000"><input type="range" id="pStrokeA" class="alpha" min="0" max="100" value="100" title="Line opacity"></label>
-    <label title="Fill colour (also the highlight colour)">Fill <input type="color" id="pFill" value="#ffff00"><input type="range" id="pFillA" class="alpha" min="0" max="100" value="100" title="Fill opacity"></label>
+    <label title="Line / border / outline colour">Line <input type="color" id="pStroke" value="#ff0000"><button class="pal" data-for="pStroke" title="Preset colours">&#9662;</button><input type="range" id="pStrokeA" class="alpha" min="0" max="100" value="100" title="Line opacity"></label>
+    <label title="Fill colour (also the highlight colour)">Fill <input type="color" id="pFill" value="#ffff00"><button class="pal" data-for="pFill" title="Preset colours">&#9662;</button><input type="range" id="pFillA" class="alpha" min="0" max="100" value="100" title="Fill opacity"></label>
     <label class="chk" title="Fill shape"><input type="checkbox" id="pFillOn"> fill</label>
-    <label title="Text colour">Text <input type="color" id="pText" value="#ffffff"><input type="range" id="pTextA" class="alpha" min="0" max="100" value="100" title="Text opacity"></label>
+    <label title="Text colour">Text <input type="color" id="pText" value="#ffffff"><button class="pal" data-for="pText" title="Preset colours">&#9662;</button><input type="range" id="pTextA" class="alpha" min="0" max="100" value="100" title="Text opacity"></label>
     <label title="Line width (0 = none, where allowed)">Width <input type="number" id="pWidth" min="0" max="60" value="4"></label>
     <label title="Font size">Font <input type="number" id="pSize" min="6" max="200" value="28"></label>
     <label class="chk" title="Bold text"><input type="checkbox" id="pBold"> <b>B</b></label>
@@ -89,6 +91,14 @@
     <button id="bZoom100" class="txt" title="Actual size (Ctrl+1)">1:1</button>
   </div>
 </footer>
+<div id="palette" hidden></div>
+<div id="help" hidden>
+  <div class="card" role="dialog" aria-label="Keyboard shortcuts">
+    <button class="x" id="helpClose" title="Close (Esc)">&times;</button>
+    <h2>Keyboard shortcuts</h2>
+    <div class="cols" id="helpBody"></div>
+  </div>
+</div>
 <script src="../tauri-api.js"></script>
 <script src="editor.js"></script>
 </body>

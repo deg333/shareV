@@ -63,3 +63,6 @@ step to change its own number.
 **Multi-select**: drag a rubber band on empty canvas, Shift/Ctrl-click to add or remove shapes, `Ctrl+A` for all.
 Option changes (colour, width, opacity, font, arrowheads…) apply to every selected shape that has that option;
 drag, arrow-key nudge, `Ctrl+D`, `Ctrl+]`/`[` and `Del` work on the whole selection.
+
+**Colour presets**: the ▾ button beside each colour opens basic HTML colours, the brand (Pantone) colours and your saved colours
+("+ Save current colour"). **Shortcuts**: the Shortcuts button (or `?` / `F1`) lists every key binding.

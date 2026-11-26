@@ -1015,6 +1015,76 @@ const openFile = () => guard(async () => {
   if (r.kind === 'svg') await loadSvgText(r.text, r.name); else await loadImage(r.dataURL, r.name);
 });
 
+// ------------------------------------------------------------------ colour presets
+const PRESETS = [
+  ['black', '#000000'], ['gray', '#808080'], ['silver', '#c0c0c0'], ['white', '#ffffff'],
+  ['navy', '#000080'], ['blue', '#0000ff'], ['teal', '#008080'], ['aqua', '#00ffff'],
+  ['green', '#008000'], ['lime', '#00ff00'], ['olive', '#808000'], ['yellow', '#ffff00'],
+  ['maroon', '#800000'], ['red', '#ff0000'], ['purple', '#800080'], ['fuchsia', '#ff00ff'],
+];
+const BRAND = [['Pantone 355 C', '#039647'], ['Pantone 342 CVC', '#007256'], ['Pantone 567 C', '#173f35'], ['Pantone 417 C', '#65665c']];
+const CUSTOM_KEY = 'sharev.customcolors';
+let customColors = [];
+try { customColors = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]').filter((c) => /^#[0-9a-f]{6}$/i.test(c)).slice(0, 16); } catch { /* ignore */ }
+const palette = $('palette');
+let paletteFor = null;
+function setColor(input, hex) {
+  input.value = hex;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function swatches(list, input) {
+  return `<div class="grid">${list.map(([name, hex]) => `<button class="sw" data-hex="${hex}" title="${esc(name)} ${hex}" style="background:${hex}"></button>`).join('')}</div>`;
+}
+function showPalette(btn) {
+  const input = $(btn.dataset.for);
+  if (paletteFor === input && !palette.hidden) { hidePalette(); return; }
+  paletteFor = input;
+  palette.innerHTML = '<h4>Basic colours</h4>' + swatches(PRESETS, input) +
+    '<h4>Brand</h4>' + swatches(BRAND, input) +
+    '<h4>My colours</h4>' + (customColors.length ? swatches(customColors.map((c) => [c, c]), input) : '<div style="color:var(--dim);font-size:12px">none saved yet</div>') +
+    '<button class="save">+ Save current colour</button>';
+  palette.hidden = false;
+  const r = btn.getBoundingClientRect();
+  palette.style.left = Math.max(8, Math.min(r.left, innerWidth - palette.offsetWidth - 8)) + 'px';
+  palette.style.top = r.bottom + 6 + 'px';
+}
+function hidePalette() { palette.hidden = true; paletteFor = null; }
+document.querySelectorAll('button.pal').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); showPalette(b); }));
+palette.addEventListener('click', (e) => {
+  const sw = e.target.closest('.sw');
+  if (sw && paletteFor) { setColor(paletteFor, sw.dataset.hex); hidePalette(); return; }
+  if (e.target.classList.contains('save') && paletteFor) {
+    const hex = paletteFor.value.toLowerCase();
+    if (!customColors.includes(hex)) customColors = [hex, ...customColors].slice(0, 16);
+    try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(customColors)); } catch { /* ignore */ }
+    const btn = document.querySelector(`button.pal[data-for="${paletteFor.id}"]`);
+    paletteFor = null; showPalette(btn);
+  }
+});
+document.addEventListener('mousedown', (e) => { if (!palette.hidden && !palette.contains(e.target) && !e.target.closest('button.pal')) hidePalette(); });
+
+// ------------------------------------------------------------------ keyboard shortcut help
+const SHORTCUTS = [
+  ['Tools', [['Select / move', 'V'], ['Rectangle', 'R'], ['Ellipse', 'E'], ['Line', 'L'], ['Arrow', 'A'], ['Pen (bezier curves)', 'P'], ['Freehand (smoothed)', 'F'],
+    ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H']]],
+  ['Selecting', [['Select several', 'Drag a box, or Shift/Ctrl + click'], ['Select all', 'Ctrl + A'], ['Deselect / back to Select', 'Esc'], ['Edit text of selected', 'Enter / double-click']]],
+  ['Editing the selection', [['Nudge 1 px', '← ↑ → ↓'], ['Nudge 10 px', 'Shift + arrow keys'], ['Duplicate', 'Ctrl + D'], ['Bring to front', 'Ctrl + ]'],
+    ['Send to back', 'Ctrl + ['], ['Delete', 'Del / Backspace'], ['Undo', 'Ctrl + Z'], ['Redo', 'Ctrl + Y / Ctrl + Shift + Z']]],
+  ['Drawing', [['Constrain line to 45° / box to square', 'hold Shift'], ['Pen: finish path', 'Enter / double-click'], ['Pen: close path', 'click the first point'],
+    ['Pen: remove last point', 'Backspace'], ['Finish text', 'Ctrl + Enter / Esc']]],
+  ['File & view', [['Open', 'Ctrl + O'], ['Save SVG', 'Ctrl + S'], ['Save SVG as…', 'Ctrl + Shift + S'], ['Copy image', 'Ctrl + C'], ['Paste image', 'Ctrl + V'],
+    ['Zoom in / out', 'Ctrl + + / Ctrl + −  (or Ctrl + wheel)'], ['Fit / actual size', 'Ctrl + 0 / Ctrl + 1'], ['This help', '? / F1']]],
+  ['Capture (global)', [['Full screen', 'PrintScreen'], ['Active window', 'Alt + PrintScreen'], ['Region', 'Ctrl + PrintScreen'], ['Last region', 'Ctrl + Shift + PrintScreen']]],
+];
+$('helpBody').innerHTML = SHORTCUTS.map(([title, rows]) => `<h3>${title}</h3>` +
+  rows.map(([a, k]) => `<div class="row"><span>${esc(a)}</span><span><kbd>${esc(k)}</kbd></span></div>`).join('')).join('');
+const help = $('help');
+const toggleHelp = (on) => { help.hidden = on === undefined ? !help.hidden : !on; };
+$('bHelp').onclick = () => toggleHelp();
+$('helpClose').onclick = () => toggleHelp(false);
+help.addEventListener('mousedown', (e) => { if (e.target === help) toggleHelp(false); });
+
 // ------------------------------------------------------------------ wiring
 document.querySelectorAll('[data-cap]').forEach((b) => b.addEventListener('click', () => window.api.capture(b.dataset.cap)));
 document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
@@ -1042,6 +1112,9 @@ addEventListener('keydown', (e) => {
   const tag = e.target.tagName;
   if (tag === 'TEXTAREA' || (tag === 'INPUT' && ['number', 'text'].includes(e.target.type))) return; // typing; sliders/checkboxes keep shortcuts
   const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+  if (!help.hidden) { if (k === 'escape' || k === '?' || k === 'f1') { toggleHelp(false); e.preventDefault(); } return; }
+  if (!palette.hidden && k === 'escape') { hidePalette(); return; }
+  if (k === '?' || k === 'f1') { toggleHelp(true); e.preventDefault(); return; }
   if (mod) {
     if (k === 'z') { e.shiftKey ? redo() : undo(); }
     else if (k === 'y') redo();

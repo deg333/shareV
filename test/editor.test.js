@@ -128,6 +128,25 @@ const SHOT = process.env.SHOT; // optional screenshot path
   const after = await page.evaluate(() => ({ ...window.__state.shapes[0] }));
   assert.ok(Math.abs(after.x - before.x - 20) < 2 && Math.abs(after.y - before.y - 20) < 2, 'rect moved by drag');
 
+  // colour presets + shortcut help
+  await page.keyboard.press('r');
+  await page.click('button.pal[data-for="pStroke"]');
+  await page.click('#palette .sw[title^="lime"]');
+  assert.strictEqual(await page.inputValue('#pStroke'), '#00ff00', 'preset applied');
+  assert.strictEqual(await page.evaluate(() => window.__state.shapes.length && true), true);
+  await page.click('button.pal[data-for="pStroke"]');
+  await page.click('#palette .sw[title^="Pantone 355"]');
+  assert.strictEqual(await page.inputValue('#pStroke'), '#039647', 'brand preset applied');
+  await page.click('button.pal[data-for="pStroke"]'); await page.click('#palette .save');
+  assert.ok((await page.locator('#palette .grid').nth(2).locator('.sw').count()) >= 1, 'custom colour saved');
+  await page.keyboard.press('Escape');
+  await page.fill('#pStroke', '#ff0000'); // restore default red for later steps
+  await page.click('#bHelp');
+  assert.ok(await page.locator('#help').isVisible() && (await page.locator('#help').innerText()).includes('Ctrl + ]'), 'shortcut help lists Ctrl+]');
+  await page.keyboard.press('Escape');
+  assert.strictEqual(await page.locator('#help').isHidden(), true);
+  await page.keyboard.press('Escape');
+
   // multi-select: rubber-band both shapes, change an option for all, nudge them together
   await page.keyboard.press('Escape');
   svgBox = await page.locator('#svg').boundingBox();
