@@ -579,6 +579,82 @@ async fn copy_text(app: AppHandle, text: String) -> Result<(), String> {
     app.clipboard().write_text(text).map_err(|e| e.to_string())
 }
 
+// ------------------------------------------------------------------ user-added emoji (ShareV-Data/emoji/*.svg)
+#[derive(Serialize)]
+struct EmojiFile {
+    file: String,
+    svg: String,
+}
+
+fn emoji_dir(app: &AppHandle) -> PathBuf {
+    let d = shared(app).data_dir.join("emoji");
+    let _ = fs::create_dir_all(&d);
+    d
+}
+fn safe_name(name: &str) -> String {
+    let stem: String = name
+        .trim_end_matches(".svg")
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' })
+        .collect();
+    let stem = stem.trim().chars().take(80).collect::<String>();
+    format!("{}.svg", if stem.is_empty() { "emoji".to_string() } else { stem })
+}
+
+#[tauri::command]
+async fn emoji_list(app: AppHandle) -> Vec<EmojiFile> {
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(emoji_dir(&app)) {
+        for e in rd.flatten() {
+            let path = e.path();
+            if path.extension().map(|x| x.eq_ignore_ascii_case("svg")).unwrap_or(false)
+                && e.metadata().map(|m| m.len() < 1_000_000).unwrap_or(false)
+            {
+                if let (Some(name), Ok(svg)) = (path.file_name(), fs::read_to_string(&path)) {
+                    out.push(EmojiFile { file: name.to_string_lossy().into_owned(), svg });
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.file.cmp(&b.file));
+    out
+}
+
+#[tauri::command]
+async fn emoji_save(app: AppHandle, name: String, svg: String) -> Result<String, String> {
+    if svg.len() > 1_000_000 {
+        return Err("SVG is too large (limit 1 MB)".into());
+    }
+    let file = safe_name(&name);
+    fs::write(emoji_dir(&app).join(&file), svg).map_err(|e| e.to_string())?;
+    Ok(file)
+}
+
+#[tauri::command]
+async fn emoji_delete(app: AppHandle, file: String) -> Result<(), String> {
+    let file = safe_name(&file);
+    fs::remove_file(emoji_dir(&app).join(file)).map_err(|e| e.to_string())
+}
+
+/// Let the user pick SVG files; returns their contents (the page sanitises and then saves them).
+#[tauri::command]
+async fn emoji_import(app: AppHandle) -> Result<Vec<EmojiFile>, String> {
+    let a = app.clone();
+    let picked = blocking(move || a.dialog().file().add_filter("SVG emoji", &["svg"]).blocking_pick_files()).await?;
+    let mut out = Vec::new();
+    for fp in picked.unwrap_or_default() {
+        if let Ok(path) = fp.into_path() {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            if let Ok(svg) = fs::read_to_string(&path) {
+                if svg.len() <= 1_000_000 {
+                    out.push(EmojiFile { file: name, svg });
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 async fn ui_load(app: AppHandle) -> Option<String> {
     fs::read_to_string(shared(&app).data_dir.join("ui-settings.json")).ok()
@@ -857,7 +933,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             capture, editor_init, editor_state, editor_title, save_svg, export_png, copy_png, open_file,
-            open_folder, overlay_init, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text
+            open_folder, overlay_init, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text, emoji_list, emoji_save, emoji_delete, emoji_import
         ])
         .setup(|app| {
             let data_dir = resolve_data_dir(app);

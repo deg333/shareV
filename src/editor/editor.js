@@ -8,9 +8,9 @@ const svg = $('svg'), ann = $('ann'), ui = $('ui'), bgImg = $('bg'), wrap = $('w
 const ta = $('edit');
 const FONT = "'Segoe UI', Helvetica, Arial, sans-serif";
 const PAD = 8;
-const BOX = new Set(['rect', 'ellipse', 'textbox', 'balloon', 'highlight', 'blur', 'pixelate']);
+const BOX = new Set(['rect', 'ellipse', 'textbox', 'balloon', 'highlight', 'blur', 'pixelate', 'emoji']);
 const FX = new Set(['blur', 'pixelate']); // effects applied to the screenshot itself, drawn under the annotations
-const SHADOWY = new Set(['rect', 'ellipse', 'line', 'arrow', 'pen', 'bezier', 'text', 'textbox', 'balloon', 'step']);
+const SHADOWY = new Set(['rect', 'ellipse', 'line', 'arrow', 'pen', 'bezier', 'text', 'textbox', 'balloon', 'step', 'emoji']);
 const TEXTY = new Set(['text', 'textbox', 'balloon']);
 
 const state = {
@@ -287,6 +287,8 @@ function shapeInner(s, hit) {
     }
     case 'blur': case 'pixelate':
       return fxInner(s);
+    case 'emoji':
+      return emojiInner(s, hit);
     case 'ocr':
       return `<rect x="${num(s.x)}" y="${num(s.y)}" width="${num(s.w)}" height="${num(s.h)}" fill="rgba(255,176,32,.15)" stroke="#ffb020" stroke-width="2" stroke-dasharray="6 4"/>`;
     case 'highlight': {
@@ -298,6 +300,75 @@ function shapeInner(s, hit) {
       return '';
   }
 }
+// ---- emoji: SVG artwork (bundled Blobmoji + user-added), sanitised, scoped and embedded as nested <svg>
+const emojiLib = new Map(); // id -> {id, name, group, char, raw|root, file, tpl, thumb}
+const DEFAULT_EMOJI = 'b:u1f60a';
+const EMOJI_DROP = ['script', 'foreignObject', 'iframe', 'object', 'embed', 'audio', 'video', 'animate', 'set', 'animateTransform', 'animateMotion'];
+function sanitizeEmoji(text) {
+  // pre-strip scripts and inline handlers textually so the parser never even sees them (also keeps the CSP log clean)
+  const pre = String(text).replace(/<!DOCTYPE[^>]*>/i, '').replace(/<script[\s\S]*?<\/script\s*>/gi, '').replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  const doc = new DOMParser().parseFromString(pre, 'image/svg+xml');
+  const root = doc.documentElement;
+  if (!root || root.localName !== 'svg' || doc.querySelector('parsererror')) return null;
+  for (const tag of EMOJI_DROP) root.querySelectorAll(tag).forEach((n) => n.remove());
+  for (const el of [root, ...root.querySelectorAll('*')]) {
+    for (const a of [...el.attributes]) {
+      const n = a.name.toLowerCase(), v = a.value;
+      if (n.startsWith('on')) el.removeAttribute(a.name);
+      else if ((n === 'href' || n === 'xlink:href') && !(v.startsWith('#') || /^data:image\/(png|jpeg|gif|webp);/i.test(v))) el.removeAttribute(a.name);
+      else if (/url\(\s*(?!['"]?#)/i.test(v)) el.removeAttribute(a.name);
+    }
+    if (el.localName === 'style') el.textContent = el.textContent.replace(/@import[^;]*;?/gi, '').replace(/url\(\s*(?!['"]?#)[^)]*\)/gi, 'none');
+  }
+  let vb = (root.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+  if (vb.length !== 4 || vb.some((n) => Number.isNaN(n)) || vb[2] <= 0 || vb[3] <= 0) {
+    const w = parseFloat(root.getAttribute('width')), h = parseFloat(root.getAttribute('height'));
+    vb = [0, 0, w > 0 ? w : 128, h > 0 ? h : 128];
+  }
+  root.setAttribute('viewBox', vb.join(' '));
+  for (const a of ['width', 'height', 'x', 'y', 'id', 'preserveAspectRatio']) root.removeAttribute(a);
+  return root;
+}
+function addEmoji(id, name, raw, group, extra = {}) {
+  const item = { id, name, group, raw, root: null, char: extra.char || '', file: extra.file || '', tpl: null, thumb: null, bad: false };
+  emojiLib.set(id, item);
+  return item;
+}
+function rootOf(item) {
+  if (!item.root && !item.bad) {
+    item.root = sanitizeEmoji(item.raw);
+    if (!item.root) item.bad = true;
+  }
+  return item.root;
+}
+/** Markup with placeholders for x/y/size and a per-shape prefix that keeps ids and CSS classes unique in one document. */
+function emojiTpl(item) {
+  if (!item.tpl) {
+    const c = rootOf(item).cloneNode(true);
+    c.setAttribute('x', '__X__'); c.setAttribute('y', '__Y__'); c.setAttribute('width', '__W__'); c.setAttribute('height', '__H__');
+    c.setAttribute('preserveAspectRatio', 'xMidYMid meet'); c.setAttribute('overflow', 'hidden');
+    c.querySelectorAll('[class]').forEach((el) => el.setAttribute('class', el.getAttribute('class').split(/\s+/).filter(Boolean).map((k) => '__P__' + k).join(' ')));
+    c.querySelectorAll('style').forEach((st) => { st.textContent = st.textContent.replace(/\.([A-Za-z_][\w-]*)/g, '.__P__$1'); });
+    item.tpl = new XMLSerializer().serializeToString(c)
+      .replace(/\sid="([^"]*)"/g, ' id="__P__$1"')
+      .replace(/url\((['"]?)#([^)'"]+)\1\)/g, 'url($1#__P__$2$1)')
+      .replace(/((?:xlink:)?href)="#([^"]*)"/g, '$1="#__P__$2"');
+  }
+  return item.tpl;
+}
+const emojiFill = (item, x, y, w, h, pre) => emojiTpl(item).replaceAll('__X__', x).replaceAll('__Y__', y).replaceAll('__W__', w).replaceAll('__H__', h).replaceAll('__P__', pre);
+function emojiThumb(item) {
+  if (!item.thumb && rootOf(item)) item.thumb = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(emojiFill(item, 0, 0, 64, 64, 't-'));
+  return item.thumb || '';
+}
+const emojiText = (item) => (rootOf(item) ? new XMLSerializer().serializeToString(rootOf(item)) : '');
+function emojiInner(s, hit) {
+  const item = emojiLib.get(s.key);
+  const box = `x="${num(s.x)}" y="${num(s.y)}" width="${num(s.w)}" height="${num(s.h)}"`;
+  if (!item || !rootOf(item)) return `<rect ${box} fill="#888" fill-opacity=".25" stroke="#888" stroke-dasharray="4 3"/>`;
+  return (hit ? `<rect class="hit" ${box} fill="transparent"/>` : '') + emojiFill(item, num(s.x), num(s.y), num(s.w), num(s.h), `e${s.id}-`);
+}
+
 // ---- blur / pixelate: computed on a canvas from the screenshot, embedded as a small raster <image>
 const fxCache = new Map();
 function fxCanvas(s) {
@@ -385,7 +456,9 @@ function buildSvg() {
   const bake = state.bakeFx && fxShapes.length && state.bgCanvas;
   const all = JSON.parse(snapshot());
   const kept = bake ? all.filter((s) => !FX.has(s.type)) : all;
-  const meta = JSON.stringify({ version: 1, w, h, shapes: kept });
+  const used = {};
+  for (const s of kept) if (s.type === 'emoji') { const it = emojiLib.get(s.key); if (it && it.group !== 'blob' && !used[s.key]) used[s.key] = emojiText(it); }
+  const meta = JSON.stringify({ version: 1, w, h, shapes: kept, ...(Object.keys(used).length ? { emoji: used } : {}) });
   const others = state.shapes.filter((s) => !FX.has(s.type));
   return `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">\n` +
@@ -412,6 +485,7 @@ function handlePoints(s) {
   const { x, y, w, h } = bounds(s);
   const hp = { nw: [x, y], n: [x + w / 2, y], ne: [x + w, y], e: [x + w, y + h / 2], se: [x + w, y + h], s: [x + w / 2, y + h], sw: [x, y + h], w: [x, y + h / 2] };
   if (s.type === 'balloon') hp.tail = [s.tx, s.ty];
+  if (s.type === 'emoji') { delete hp.n; delete hp.s; delete hp.e; delete hp.w; }
   return hp;
 }
 function bezierGuides(s, interactive, z) {
@@ -515,6 +589,9 @@ async function loadSvgText(text, name) {
   const bgEl = doc.querySelector('#sharev-bg');
   if (meta && bgEl) {
     const d = JSON.parse(meta.textContent);
+    for (const [id, text] of Object.entries(d.emoji || {})) { // emoji that came from outside the bundled set travel inside the file
+      if (typeof text === 'string' && text.length < 1000000 && !emojiLib.has(id)) addEmoji(id, 'embedded emoji', text, 'doc');
+    }
     const href = bgEl.getAttribute('xlink:href') || bgEl.getAttribute('href');
     loadDoc({ bg: href, w: d.w, h: d.h, shapes: d.shapes }, name);
     return;
@@ -571,6 +648,7 @@ const DEFAULT_OPTS = {
   balloon: { ...BOX_OPTS },
   highlight: { fill: YELLOW, fa: 0.5, stroke: RED, sw: 0 },
   ocr: {},
+  emoji: { size: 96, key: DEFAULT_EMOJI },
   blur: { amt: 12 },
   pixelate: { amt: 12 },
   step: { fill: RED, tc: WHITE, size: 36, stroke: WHITE, sw: 0 }, // numbered red circle
@@ -625,12 +703,12 @@ const RELEVANT = {
   line: LINEY, arrow: LINEY, pen: LINEY, bezier: [...LINEY, 'fill', 'fillOn'],
   text: ['text', 'stroke', 'width', 'size', 'bold'], textbox: BOXY, balloon: BOXY, highlight: ['stroke', 'fill', 'width'],
   step: ['fill', 'text', 'stroke', 'width', 'size', 'num'],
-  blur: ['amount'], pixelate: ['amount'], ocr: [],
+  blur: ['amount'], pixelate: ['amount'], ocr: [], emoji: ['size', 'emoji'],
 };
 for (const k of Object.keys(RELEVANT)) if (SHADOWY.has(k)) RELEVANT[k] = [...RELEVANT[k], 'shadow', 'shadowSize'];
 const AMOUNT_LABEL = { blur: 'Radius', pixelate: 'Block' };
 const STROKE_LABEL = { text: 'Outline', textbox: 'Border', balloon: 'Border', step: 'Border' };
-const SIZE_LABEL = { step: 'Size' };
+const SIZE_LABEL = { step: 'Size', emoji: 'Size' };
 const maxStep = () => state.shapes.reduce((m, s) => (s.type === 'step' ? Math.max(m, s.n) : m), 0);
 const nextStep = () => (state.stepOverride ?? maxStep() + 1);
 function refreshNum() { if (state.tool === 'step') P.num.value = nextStep(); }
@@ -655,6 +733,9 @@ function updateControls() {
   }
   const first = P.stroke.closest('label').firstChild;
   if (first && first.nodeType === 3) first.nodeValue = (STROKE_LABEL[type] || 'Line') + ' ';
+  const showEmoji = rel.includes('emoji');
+  $('pEmojiLbl').hidden = !showEmoji;
+  if (showEmoji) refreshEmojiBtn();
   const am = P.amount.closest('label').querySelector('.lbl');
   if (am) am.textContent = AMOUNT_LABEL[type] || 'Radius';
   const sz = P.size.closest('label').firstChild;
@@ -692,6 +773,7 @@ function syncProps() {
     P.textA.value = Math.round((s.ta ?? 1) * 100);
     if (s.type === 'step') P.num.value = s.n;
     if ('amt' in s) P.amount.value = s.amt;
+    if (s.type === 'emoji') P.size.value = Math.round(s.w);
     if (SHADOWY.has(s.type)) { P.shadow.checked = !!s.sh; P.shadowSize.value = s.shz || 4; }
     if (HEADY.has(s.type)) { P.headStart.checked = headOn(s, false); P.headEnd.checked = headOn(s, true); P.headSize.value = Math.round(headLen(s)); }
   }
@@ -727,7 +809,10 @@ function applyProp(s, key, v, store) {
       case 'fillOn': if (s.type !== 'highlight' && 'fill' in s) s.fill = v ? P.fill.value : 'none'; break;
       case 'text': if (TEXTY.has(s.type)) s.tc = v; break;
       case 'width': if ('sw' in s) s.sw = clamp(+v || 0, ['text', 'highlight', 'step'].includes(s.type) ? 0 : 1, 60); break;
-      case 'size': if ('size' in s) s.size = clamp(+v || 12, 6, 400); break;
+      case 'size':
+        if (s.type === 'emoji') { const n = clamp(+v || 8, 8, 4000); s.x += (s.w - n) / 2; s.y += (s.h - n) / 2; s.w = s.h = n; }
+        else if ('size' in s) s.size = clamp(+v || 12, 6, 400);
+        break;
       case 'amount': if (FX.has(s.type)) s.amt = clamp(Math.round(+v || 1), 1, 200); break;
       case 'shadow': if (SHADOWY.has(s.type)) s.sh = v; break;
       case 'shadowSize': if (SHADOWY.has(s.type)) s.shz = clamp(Math.round(+v || 4), 1, 40); break;
@@ -811,6 +896,8 @@ function newShape0(tool, p) {
       return { ...base, x: p.x, y: p.y, w: 0, h: 0, amt: o.amt };
     case 'ocr':
       return { ...base, x: p.x, y: p.y, w: 0, h: 0 };
+    case 'emoji':
+      return { ...base, x: p.x, y: p.y, w: 0, h: 0, key: emojiLib.has(o.key) ? o.key : DEFAULT_EMOJI };
     case 'step': {
       const n = nextStep();
       state.stepOverride = null;
@@ -927,6 +1014,7 @@ svg.addEventListener('pointermove', (e) => {
     if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) * state.zoom > 3) drag.moved = true;
     switch (s.type) {
       case 'step': s.x = p.x; s.y = p.y; break;
+      case 'emoji': setBox(s, drag.start, p, true); break;
       case 'rect': case 'ellipse': setBox(s, drag.start, p, e.shiftKey); break;
       case 'highlight': case 'textbox': case 'balloon': case 'blur': case 'pixelate': case 'ocr': setBox(s, drag.start, p, false); break;
       case 'line': case 'arrow': { const q = e.shiftKey ? snap45(drag.start, p) : p; s.x2 = q.x; s.y2 = q.y; break; }
@@ -949,6 +1037,12 @@ svg.addEventListener('pointermove', (e) => {
       if (h[0] === 'n') { n.x = p.x; n.y = p.y; n.hx = on.hx + (p.x - on.x); n.hy = on.hy + (p.y - on.y); }
       else if (h[0] === 'h') { n.hx = p.x; n.hy = p.y; }
       else { n.hx = 2 * n.x - p.x; n.hy = 2 * n.y - p.y; }
+    } else if (s.type === 'emoji') { // square, scaled from the opposite corner
+      const ax = h.includes('w') ? o.x + o.w : o.x, ay = h.includes('n') ? o.y + o.h : o.y;
+      const size = Math.max(8, Math.abs(p.x - ax), Math.abs(p.y - ay));
+      s.w = s.h = size;
+      s.x = h.includes('w') ? ax - size : ax;
+      s.y = h.includes('n') ? ay - size : ay;
     } else if (h === 'p1') { const q = e.shiftKey ? snap45({ x: o.x2, y: o.y2 }, p) : p; s.x1 = q.x; s.y1 = q.y; }
     else if (h === 'p2') { const q = e.shiftKey ? snap45({ x: o.x1, y: o.y1 }, p) : p; s.x2 = q.x; s.y2 = q.y; }
     else if (h === 'tail') { s.tx = p.x; s.ty = p.y; }
@@ -971,6 +1065,12 @@ function endDrag() {
   if (d.kind === 'bnode') { render(); return; }
   if (d.kind === 'marquee') { state.marquee = null; syncProps(); render(); return; }
   if (d.kind === 'create') {
+    if (s.type === 'emoji') { // stamp: a click drops the default size, a drag sizes it; the tool stays active
+      if (!d.moved) { const size = toolOpts.emoji.size; s.w = s.h = size; s.x = d.start.x - size / 2; s.y = d.start.y - size / 2; }
+      else if (s.w < 8) { state.shapes = state.shapes.filter((x) => x !== s); state.sel = null; render(); return; }
+      else { toolOpts.emoji.size = Math.round(s.w); persistOpts(); P.size.value = toolOpts.emoji.size; }
+      pushUndo(d.pre); state.sel = s.id; render(); return;
+    }
     if (s.type === 'ocr') { // region picker only: nothing is stored
       state.shapes = state.shapes.filter((x) => x !== s); state.sel = null;
       setTool('select'); render();
@@ -1276,6 +1376,146 @@ ocrLinesEl.addEventListener('click', (e) => {
 ocrLinesEl.addEventListener('mouseover', (e) => { const row = e.target.closest('.ln'); showHl(row ? ocrState.lines[+row.dataset.i] : null); });
 ocrLinesEl.addEventListener('mouseleave', () => showHl(null));
 
+// ------------------------------------------------------------------ emoji picker
+for (const e of window.BLOB_EMOJI || []) addEmoji('b:' + e.i, e.n, e.s, 'blob', { char: e.c });
+function loadUserEmoji() {
+  if (!window.api.emojiList) return;
+  window.api.emojiList().then((list) => {
+    for (const f of list || []) addEmoji('u:' + f.file, f.file.replace(/\.svg$/i, '').replace(/[_-]+/g, ' '), f.svg, 'user', { file: f.file });
+    if (!ep.hidden) renderPicker();
+  }).catch(() => {});
+}
+const ep = $('emojiPicker'), egrid = $('emojiGrid'), estatus = $('emojiStatus');
+const currentEmojiKey = () => {
+  const s = state.tool === 'select' ? selShapes().find((x) => x.type === 'emoji') : null;
+  return s ? s.key : toolOpts.emoji.key;
+};
+function refreshEmojiBtn() {
+  const it = emojiLib.get(currentEmojiKey()) || emojiLib.get(DEFAULT_EMOJI);
+  $('pEmoji').innerHTML = it ? `<img alt="" src="${emojiThumb(it)}">` : '';
+  $('pEmoji').title = it ? `Emoji: ${it.name}. Click to choose another.` : 'Choose emoji';
+}
+function renderPicker() {
+  const q = $('emojiSearch').value.trim().toLowerCase().replace(/\ufe0f/g, '');
+  const cur = currentEmojiKey();
+  const match = (it) => !q || it.name.toLowerCase().includes(q) || (it.char && it.char.replace(/\ufe0f/g, '').includes(q)) || it.id.toLowerCase().includes(q);
+  const groups = [['My emoji', 'user'], ['In this document', 'doc'], ['Emoji', 'blob']];
+  let html = '', any = false;
+  for (const [title, g] of groups) {
+    const items = [...emojiLib.values()].filter((it) => it.group === g && !it.bad && match(it));
+    if (!items.length) continue;
+    any = true;
+    html += `<h4>${title}</h4>` + items.map((it) => {
+      const th = emojiThumb(it);
+      return th ? `<button class="em${it.id === cur ? ' cur' : ''}" data-id="${esc(it.id)}" title="${esc(it.name)}"><img alt="" src="${th}">${g === 'user' ? '<span class="del" data-del="1" title="Remove from my emoji">&times;</span>' : ''}</button>` : '';
+    }).join('');
+  }
+  egrid.innerHTML = any ? html : '<div class="none">No match. Paste an emoji (or its hex code) below to fetch it from svgmoji, or import your own SVG files.</div>';
+}
+function showEmojiPicker(anchor) {
+  if (!ep.hidden && ep.dataset.anchor === anchor.id + anchor.dataset.tool) { hideEmojiPicker(); return; }
+  ep.dataset.anchor = anchor.id + anchor.dataset.tool;
+  $('emojiSearch').value = '';
+  renderPicker();
+  ep.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  ep.style.left = Math.max(8, Math.min(r.left, innerWidth - ep.offsetWidth - 8)) + 'px';
+  ep.style.top = Math.min(r.bottom + 6, Math.max(8, innerHeight - ep.offsetHeight - 8)) + 'px';
+  $('emojiSearch').focus();
+}
+function hideEmojiPicker() { ep.hidden = true; ep.dataset.anchor = ''; }
+function chooseEmoji(id) {
+  toolOpts.emoji.key = id;
+  persistOpts();
+  const targets = state.tool === 'select' ? selShapes().filter((s) => s.type === 'emoji') : [];
+  if (targets.length) { const pre = snapshot(); targets.forEach((s) => { s.key = id; }); pushUndo(pre); render(); }
+  else if (state.tool !== 'emoji') setTool('emoji');
+  refreshEmojiBtn();
+  hideEmojiPicker();
+}
+async function removeUserEmoji(id) {
+  const it = emojiLib.get(id);
+  if (!it || it.group !== 'user') return;
+  try { if (window.api.emojiDelete) await window.api.emojiDelete(it.file); } catch { /* already gone */ }
+  emojiLib.delete(id);
+  if (toolOpts.emoji.key === id) { toolOpts.emoji.key = DEFAULT_EMOJI; persistOpts(); }
+  renderPicker(); refreshEmojiBtn();
+}
+$('emojiSearch').addEventListener('input', renderPicker);
+egrid.addEventListener('click', (e) => {
+  const b = e.target.closest('.em');
+  if (!b) return;
+  if (e.target.dataset.del) { removeUserEmoji(b.dataset.id); return; }
+  chooseEmoji(b.dataset.id);
+});
+document.addEventListener('mousedown', (e) => { if (!ep.hidden && !ep.contains(e.target) && !e.target.closest('#pEmoji, [data-tool="emoji"]')) hideEmojiPicker(); });
+$('pEmoji').addEventListener('click', (e) => { e.preventDefault(); showEmojiPicker($('pEmoji')); });
+document.querySelector('[data-tool="emoji"]').addEventListener('click', (e) => showEmojiPicker(e.currentTarget));
+
+const svgmojiUrl = (set, hex) => `https://raw.githubusercontent.com/svgmoji/svgmoji/v3.2.0/packages/svgmoji__${set}/svg/${hex}.svg`;
+/** "😀 🚀", "1F600", "U+1F680" or "1F468-200D-1F4BB" -> ['1F600', '1F680', ...] (svgmoji hexcodes) */
+function parseEmojiInput(s) {
+  const out = [];
+  const isHex = (t) => /^(u\+)?[0-9a-f]{4,6}([-_+](u\+)?[0-9a-f]{2,6})*$/i.test(t) && (/[0-9]/.test(t) || /^u\+/i.test(t));
+  const rest = [];
+  for (const tok of s.split(/[\s,;]+/).filter(Boolean)) {
+    if (isHex(tok)) out.push(tok.replace(/u\+/gi, '').replace(/[_+]/g, '-').toUpperCase());
+    else rest.push(tok);
+  }
+  const text = rest.join(' ');
+  const segs = typeof Intl !== 'undefined' && Intl.Segmenter ? [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map((x) => x.segment) : [...text];
+  for (const g of segs) {
+    if (/\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u.test(g)) out.push([...g].map((c) => c.codePointAt(0).toString(16).toUpperCase()).join('-'));
+  }
+  return out;
+}
+async function fetchEmoji() {
+  const input = $('emojiFetchIn').value.trim();
+  if (!input) return;
+  const set = $('emojiSet').value;
+  const codes = parseEmojiInput(input);
+  if (!codes.length) { estatus.textContent = 'Paste an emoji or a hex code such as 1F600.'; return; }
+  let added = 0, firstId = '';
+  const failed = [];
+  estatus.textContent = 'Fetching…';
+  for (const hex of codes) {
+    // svgmoji keeps variation selectors only for some emoji: try with and without FE0F
+    const cands = [...new Set([hex, hex.replace(/-FE0F/g, ''), hex.includes('FE0F') ? hex : hex + '-FE0F'])];
+    let text = null;
+    for (const c of cands) {
+      try { const r = await fetch(svgmojiUrl(set, c)); if (r.ok) { text = await r.text(); break; } } catch { /* offline: handled below */ }
+    }
+    if (!text || !sanitizeEmoji(text)) { failed.push(hex); continue; }
+    const name = `${set}_${hex}`;
+    try {
+      const file = window.api.emojiSave ? await window.api.emojiSave(name, text) : name + '.svg';
+      const id = 'u:' + file;
+      addEmoji(id, `${set} ${hex}`, text, 'user', { file });
+      firstId = firstId || id; added++;
+    } catch (err) { failed.push(hex); }
+  }
+  estatus.textContent = (added ? `Added ${added}. ` : '') + (failed.length ? `Not found / offline: ${failed.join(', ')}` : '');
+  if (added) { $('emojiFetchIn').value = ''; $('emojiSearch').value = ''; renderPicker(); }
+}
+async function importEmojiFiles() {
+  if (!window.api.emojiImport) return;
+  const files = await window.api.emojiImport();
+  let added = 0;
+  for (const f of files || []) {
+    if (!sanitizeEmoji(f.svg)) continue;
+    const file = await window.api.emojiSave(f.file, f.svg);
+    addEmoji('u:' + file, file.replace(/\.svg$/i, '').replace(/[_-]+/g, ' '), f.svg, 'user', { file });
+    added++;
+  }
+  estatus.textContent = added ? `Imported ${added} file${added === 1 ? '' : 's'}.` : 'No valid SVG files imported.';
+  if (added) renderPicker();
+}
+$('emojiFetch').onclick = () => guard(fetchEmoji);
+$('emojiFetchIn').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); guard(fetchEmoji); } e.stopPropagation(); });
+$('emojiSearch').addEventListener('keydown', (e) => { if (e.key === 'Escape') hideEmojiPicker(); e.stopPropagation(); });
+$('emojiImport').onclick = () => guard(importEmojiFiles);
+loadUserEmoji();
+
 // ------------------------------------------------------------------ colour presets
 const PRESETS = [
   ['black', '#000000'], ['gray', '#808080'], ['silver', '#c0c0c0'], ['white', '#ffffff'],
@@ -1328,7 +1568,7 @@ document.addEventListener('mousedown', (e) => { if (!palette.hidden && !palette.
 // ------------------------------------------------------------------ keyboard shortcut help
 const SHORTCUTS = [
   ['Tools', [['Select / move', 'V'], ['Rectangle', 'R'], ['Ellipse', 'E'], ['Line', 'L'], ['Arrow', 'A'], ['Pen (bezier curves)', 'P'], ['Freehand (smoothed)', 'F'],
-    ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H'], ['Blur region', 'U'], ['Pixelate region', 'X'], ['Recognise text in region (OCR)', 'O']]],
+    ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H'], ['Blur region', 'U'], ['Pixelate region', 'X'], ['Recognise text in region (OCR)', 'O'], ['Emoji stamp', 'M']]],
   ['Selecting', [['Select several', 'Drag a box, or Shift/Ctrl + click'], ['Select all', 'Ctrl + A'], ['Deselect / back to Select', 'Esc'], ['Edit text of selected', 'Enter / double-click']]],
   ['Editing the selection', [['Nudge 1 px', '← ↑ → ↓'], ['Nudge 10 px', 'Shift + arrow keys'], ['Duplicate', 'Ctrl + D'], ['Bring to front', 'Ctrl + ]'],
     ['Send to back', 'Ctrl + ['], ['Delete', 'Del / Backspace'], ['Undo', 'Ctrl + Z'], ['Redo', 'Ctrl + Y / Ctrl + Shift + Z']]],
@@ -1387,7 +1627,7 @@ stage.addEventListener('wheel', (e) => {
 }, { passive: false });
 addEventListener('resize', () => { if (state.loaded && state.zoom <= 1) fit(); });
 
-const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight', n: 'step', u: 'blur', x: 'pixelate', o: 'ocr' };
+const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight', n: 'step', u: 'blur', x: 'pixelate', o: 'ocr', m: 'emoji' };
 addEventListener('keydown', (e) => {
   const tag = e.target.tagName;
   if (tag === 'TEXTAREA' || (tag === 'INPUT' && ['number', 'text'].includes(e.target.type))) return; // typing; sliders/checkboxes keep shortcuts

@@ -12,7 +12,7 @@ const SHOT = process.env.SHOT; // optional screenshot path
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/status of 404/.test(m.text())) errors.push(m.text()); }); // 404s come from the emoji-fetch test
 
   await page.addInitScript(() => {
     window.__saved = null;
@@ -22,6 +22,7 @@ const SHOT = process.env.SHOT; // optional screenshot path
       exportPng: async () => 'x.png', copyPng: async (d) => { window.__copied = d; return true; },
       openFile: async () => null, openFolder() {},
       ocr: async () => ({ language: 'English', lines: [{ text: 'Hello window', x: 90, y: 95, w: 210, h: 34 }, { text: 'second line', x: 90, y: 140, w: 150, h: 30 }] }), copyText: async (t) => { window.__copied = t; },
+      emojiList: async () => [], emojiSave: async (n) => { window.__emojiSaved = n; return n.endsWith('.svg') ? n : n + '.svg'; }, emojiDelete: async () => {}, emojiImport: async () => [{ file: 'my star.svg', svg: '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><script>alert(1)</script><path onclick="x()" d="M32 4l8 24h24l-20 15 8 24-20-15-20 15 8-24L0 28h24z" fill="gold"/></svg>' }],
       loadUi: async () => null, saveUi: async (j) => { window.__ui = j; }, exportUi: async (j) => { window.__export = j; return 'x.json'; }, importUi: async () => window.__import || null,
     };
   });
@@ -244,6 +245,70 @@ const SHOT = process.env.SHOT; // optional screenshot path
   out = await page.evaluate(() => window.__sharev.buildSvg());
   assert.ok(out.includes('id="effects"') && /&quot;type&quot;:&quot;blur&quot;/.test(out), 'unbaked keeps editable effects');
   await page.evaluate(() => { window.__state.bakeFx = true; });
+
+  // emoji: bundled Blobmoji, stamp, resize, fetch from svgmoji, import
+  await page.route('https://raw.githubusercontent.com/svgmoji/**', (route) => {
+    const url = route.request().url();
+    if (url.includes('svgmoji__noto/svg/1F680.svg')) {
+      route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'access-control-allow-origin': '*' }, body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><linearGradient id="g"><stop offset="0" stop-color="red"/></linearGradient></defs><rect width="10" height="10" fill="url(#g)"/></svg>' });
+    } else route.fulfill({ status: 404, headers: { 'access-control-allow-origin': '*' }, body: 'nope' });
+  });
+  svgBox = await page.locator('#svg').boundingBox();
+  await page.click('[data-tool="emoji"]');
+  assert.ok(await page.locator('#emojiPicker').isVisible(), 'picker opens with the tool');
+  assert.ok((await page.locator('#emojiGrid .em').count()) >= 250, 'all bundled emoji listed');
+  await page.fill('#emojiSearch', 'smiling face');
+  const filtered = await page.locator('#emojiGrid .em').count();
+  assert.ok(filtered > 0 && filtered < 250, 'search filters');
+  await page.locator('#emojiGrid .em').first().click();
+  assert.ok(await page.locator('#emojiPicker').isHidden());
+  await page.mouse.click(...at(700, 300));
+  await page.mouse.click(...at(500, 480));
+  let em = await page.evaluate(() => window.__state.shapes.filter((s) => s.type === 'emoji').map((s) => [s.key, Math.round(s.w), Math.round(s.h)]));
+  assert.strictEqual(em.length, 2);
+  assert.deepStrictEqual(em[0].slice(1), [96, 96], 'click stamps the default size');
+  assert.strictEqual(em[0][0], em[1][0]);
+  // drag to size
+  await drag('m', [600, 450], [700, 540]);
+  assert.strictEqual(await page.evaluate(() => window.__state.shapes.filter((s) => s.type === 'emoji').length), 3);
+  // two stamps of the same emoji keep unique ids/classes in the document
+  out = await page.evaluate(() => window.__sharev.buildSvg());
+  const ids = [...out.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+  assert.strictEqual(new Set(ids).size, ids.length, 'all ids unique in the saved svg');
+  assert.ok(/<svg [^>]*\bx="[\d.]+"[^>]*\bwidth="[\d.]+"/.test(out.split('<g id="annotations">')[1]), 'emoji embedded as nested svg');
+  // resize the last emoji from its corner (aspect stays square)
+  await page.keyboard.press('v');
+  await page.mouse.click(...at(650, 495));
+  const sel0 = await page.evaluate(() => { const s = window.__state.shapes.at(-1); return { x: s.x, y: s.y, w: s.w }; });
+  const hnd = await page.locator('#ui [data-h="se"]').boundingBox();
+  await page.mouse.move(hnd.x + hnd.width / 2, hnd.y + hnd.height / 2); await page.mouse.down();
+  await page.mouse.move(hnd.x + hnd.width / 2 + 40, hnd.y + hnd.height / 2 + 10, { steps: 3 }); await page.mouse.up();
+  const sel1 = await page.evaluate(() => { const s = window.__state.shapes.at(-1); return { x: s.x, y: s.y, w: s.w, h: s.h }; });
+  assert.ok(sel1.w > sel0.w + 30 && Math.abs(sel1.w - sel1.h) < 0.01 && sel1.x === sel0.x, 'resized, square, anchored');
+  assert.strictEqual(await page.locator('#ui [data-h="n"]').count(), 0, 'emoji has corner handles only');
+  // size option
+  await page.fill('#pSize', '50'); await page.press('#pSize', 'Enter');
+  assert.strictEqual(await page.evaluate(() => Math.round(window.__state.shapes.at(-1).w)), 50, 'size option resizes the selected emoji');
+  // fetch a new emoji from svgmoji by pasting the character
+  await page.click('#pEmoji');
+  await page.fill('#emojiFetchIn', '🚀'); await page.selectOption('#emojiSet', 'noto'); await page.click('#emojiFetch');
+  await page.waitForFunction(() => document.getElementById('emojiStatus').textContent.startsWith('Added 1'));
+  assert.strictEqual(await page.evaluate(() => window.__emojiSaved), 'noto_1F680', 'saved under svgmoji hexcode');
+  assert.ok((await page.locator('#emojiGrid h4', { hasText: 'My emoji' }).count()) === 1, 'listed under My emoji');
+  await page.fill('#emojiFetchIn', '1F9FF'); await page.click('#emojiFetch');
+  await page.waitForFunction(() => document.getElementById('emojiStatus').textContent.includes('Not found'));
+  // import own SVG: scripts and handlers are stripped
+  await page.click('#emojiImport');
+  await page.waitForFunction(() => document.getElementById('emojiStatus').textContent.startsWith('Imported 1'));
+  const mine = await page.locator('#emojiGrid .em[data-id^="u:"]').count();
+  assert.strictEqual(mine, 2);
+  await page.locator('#emojiGrid .em[data-id^="u:"]').last().click(); // choose it: swaps the selected emoji
+  const key = await page.evaluate(() => window.__state.shapes.at(-1).key);
+  assert.ok(key.startsWith('u:'), 'selected emoji swapped to the chosen one');
+  out = await page.evaluate(() => window.__sharev.buildSvg());
+  assert.ok(!out.includes('alert(1)') && !out.includes('onclick'), 'imported svg sanitised');
+  assert.ok(out.includes('&quot;emoji&quot;:{'), 'non-bundled emoji embedded in the file metadata');
+  await page.keyboard.press('Escape');
 
   // OCR sidebar: recognise, list, copy, place as SVG text
   await page.click('#bOcr');

@@ -81,3 +81,10 @@ engine (no download; uses your installed Windows languages) and lists it in a si
 as real, editable SVG text at its original position — optionally painting over the original pixels with the sampled
 background colour ("cover original text") and using the sampled text colour. Blur/pixelate are applied before
 recognising, so redacted text is never read.
+
+**Emoji stamps (`M`)**: pick an emoji from the bundled blob set (291 SVGs, searchable) and click to stamp it or drag to
+size it; select it to resize from a corner (stays square), change "Size", add a shadow, or swap it for another emoji.
+Emoji are embedded in the SVG as real vector artwork (ids/classes are scoped per stamp). Add more from
+[svgmoji](https://github.com/svgmoji/svgmoji): paste an emoji (e.g. from the Win+. panel) or a hex code, choose
+Blobmoji / Noto / OpenMoji / Twemoji and press Add (needs internet once; it is saved to `ShareV-Data/emoji/`), or import
+your own `.svg` files. Imported/downloaded SVGs are sanitised (scripts, handlers and external references removed).
