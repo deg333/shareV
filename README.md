@@ -88,3 +88,6 @@ Emoji are embedded in the SVG as real vector artwork (ids/classes are scoped per
 [svgmoji](https://github.com/svgmoji/svgmoji): paste an emoji (e.g. from the Win+. panel) or a hex code, choose
 Blobmoji / Noto / OpenMoji / Twemoji and press Add (needs internet once; it is saved to `ShareV-Data/emoji/`), or import
 your own `.svg` files. Imported/downloaded SVGs are sanitised (scripts, handlers and external references removed).
+
+**Favourite emoji**: hover an emoji in the picker and click its ☆ (or right-click it) to pin it. Favourites are listed first
+in the picker, are saved with your other settings in `ShareV-Data/ui-settings.json` (and included in Settings > Export/Import).

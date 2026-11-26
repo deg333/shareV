@@ -665,10 +665,14 @@ let saveTimer = 0;
 /** Persist tool options + custom colours: localStorage (fallback) and ShareV-Data/ui-settings.json (portable). */
 function persistOpts() {
   try { localStorage.setItem(OPTS_KEY, JSON.stringify(toolOpts)); } catch { /* ignore */ }
+  try { localStorage.setItem(FAV_KEY, JSON.stringify(favEmoji)); } catch { /* ignore */ }
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { if (window.api.saveUi) window.api.saveUi(settingsJson()).catch(() => {}); }, 400);
 }
-const settingsJson = () => JSON.stringify({ app: 'ShareV', version: 1, toolOpts, customColors, bakeFx: state.bakeFx }, null, 2);
+const FAV_KEY = 'sharev.favemoji';
+let favEmoji = [];
+try { favEmoji = (JSON.parse(localStorage.getItem(FAV_KEY) || '[]') || []).filter((x) => typeof x === 'string').slice(0, 200); } catch { /* ignore */ }
+const settingsJson = () => JSON.stringify({ app: 'ShareV', version: 1, toolOpts, customColors, bakeFx: state.bakeFx, favEmoji }, null, 2);
 function applySettings(obj) {
   const src = (obj && obj.toolOpts) || {};
   for (const k of Object.keys(DEFAULT_OPTS)) {
@@ -677,6 +681,7 @@ function applySettings(obj) {
     toolOpts[k] = { ...ALPHA, ...(SHADOWY.has(k) ? SHADOW_DEFAULT : {}), ...DEFAULT_OPTS[k], ...clean };
   }
   state.bakeFx = !(obj && obj.bakeFx === false);
+  if (obj && Array.isArray(obj.favEmoji)) { favEmoji = obj.favEmoji.filter((x) => typeof x === 'string').slice(0, 200); if (typeof renderPicker === 'function' && !ep.hidden) renderPicker(); }
   if (typeof refreshBakeLabel === 'function') refreshBakeLabel();
   customColors = Array.isArray(obj && obj.customColors) ? obj.customColors.filter((c) => /^#[0-9a-f]{6}$/i.test(c)).slice(0, 16) : [];
   const type = ctxType();
@@ -1399,15 +1404,17 @@ function renderPicker() {
   const q = $('emojiSearch').value.trim().toLowerCase().replace(/\ufe0f/g, '');
   const cur = currentEmojiKey();
   const match = (it) => !q || it.name.toLowerCase().includes(q) || (it.char && it.char.replace(/\ufe0f/g, '').includes(q)) || it.id.toLowerCase().includes(q);
-  const groups = [['My emoji', 'user'], ['In this document', 'doc'], ['Emoji', 'blob']];
+  const groups = [['Favourites', 'fav'], ['My emoji', 'user'], ['In this document', 'doc'], ['Emoji', 'blob']];
   let html = '', any = false;
   for (const [title, g] of groups) {
-    const items = [...emojiLib.values()].filter((it) => it.group === g && !it.bad && match(it));
+    const items = g === 'fav'
+      ? favEmoji.map((id) => emojiLib.get(id)).filter((it) => it && !it.bad && match(it))
+      : [...emojiLib.values()].filter((it) => it.group === g && !it.bad && match(it));
     if (!items.length) continue;
     any = true;
-    html += `<h4>${title}</h4>` + items.map((it) => {
-      const th = emojiThumb(it);
-      return th ? `<button class="em${it.id === cur ? ' cur' : ''}" data-id="${esc(it.id)}" title="${esc(it.name)}"><img alt="" src="${th}">${g === 'user' ? '<span class="del" data-del="1" title="Remove from my emoji">&times;</span>' : ''}</button>` : '';
+    html += `<h4>${g === 'fav' ? '&#9733; ' : ''}${title}</h4>` + items.map((it) => {
+      const th = emojiThumb(it), fav = favEmoji.includes(it.id);
+      return th ? `<button class="em${it.id === cur ? ' cur' : ''}${fav ? ' isfav' : ''}" data-id="${esc(it.id)}" title="${esc(it.name)}  (right-click or &#9733; to ${fav ? 'unpin' : 'pin to the top'})"><img alt="" src="${th}"><span class="fav" data-fav="1">${fav ? '&#9733;' : '&#9734;'}</span>${g === 'user' ? '<span class="del" data-del="1" title="Remove from my emoji">&times;</span>' : ''}</button>` : '';
     }).join('');
   }
   egrid.innerHTML = any ? html : '<div class="none">No match. Paste an emoji (or its hex code) below to fetch it from svgmoji, or import your own SVG files.</div>';
@@ -1433,11 +1440,20 @@ function chooseEmoji(id) {
   refreshEmojiBtn();
   hideEmojiPicker();
 }
+/** Pin / unpin an emoji; favourites are listed first in the picker and saved with the other settings. */
+function toggleFav(id) {
+  favEmoji = favEmoji.includes(id) ? favEmoji.filter((x) => x !== id) : [...favEmoji, id];
+  persistOpts();
+  const keep = egrid.scrollTop;
+  renderPicker();
+  egrid.scrollTop = keep;
+}
 async function removeUserEmoji(id) {
   const it = emojiLib.get(id);
   if (!it || it.group !== 'user') return;
   try { if (window.api.emojiDelete) await window.api.emojiDelete(it.file); } catch { /* already gone */ }
   emojiLib.delete(id);
+  if (favEmoji.includes(id)) { favEmoji = favEmoji.filter((x) => x !== id); persistOpts(); }
   if (toolOpts.emoji.key === id) { toolOpts.emoji.key = DEFAULT_EMOJI; persistOpts(); }
   renderPicker(); refreshEmojiBtn();
 }
@@ -1446,8 +1462,10 @@ egrid.addEventListener('click', (e) => {
   const b = e.target.closest('.em');
   if (!b) return;
   if (e.target.dataset.del) { removeUserEmoji(b.dataset.id); return; }
+  if (e.target.dataset.fav) { toggleFav(b.dataset.id); return; }
   chooseEmoji(b.dataset.id);
 });
+egrid.addEventListener('contextmenu', (e) => { const b = e.target.closest('.em'); if (b) { e.preventDefault(); toggleFav(b.dataset.id); } });
 document.addEventListener('mousedown', (e) => { if (!ep.hidden && !ep.contains(e.target) && !e.target.closest('#pEmoji, [data-tool="emoji"]')) hideEmojiPicker(); });
 $('pEmoji').addEventListener('click', (e) => { e.preventDefault(); showEmojiPicker($('pEmoji')); });
 document.querySelector('[data-tool="emoji"]').addEventListener('click', (e) => showEmojiPicker(e.currentTarget));

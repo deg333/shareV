@@ -308,7 +308,33 @@ const SHOT = process.env.SHOT; // optional screenshot path
   out = await page.evaluate(() => window.__sharev.buildSvg());
   assert.ok(!out.includes('alert(1)') && !out.includes('onclick'), 'imported svg sanitised');
   assert.ok(out.includes('&quot;emoji&quot;:{'), 'non-bundled emoji embedded in the file metadata');
+  // favourites: pinned to the top, saved in the settings
+  await page.click('#pEmoji');
+  await page.fill('#emojiSearch', '');
+  const fv = await page.locator('#emojiGrid .em[data-id^="b:"]').evaluateAll((els) => els.slice(5, 8).map((e) => e.dataset.id));
+  await page.locator(`#emojiGrid .em[data-id="${fv[0]}"]`).first().hover();
+  await page.locator(`#emojiGrid .em[data-id="${fv[0]}"] .fav`).first().click();
+  await page.locator(`#emojiGrid .em[data-id="${fv[1]}"]`).first().click({ button: 'right' });
+  assert.strictEqual(await page.locator('#emojiGrid h4').first().innerText().then((s) => s.replace('\u2605', '').trim().toLowerCase()), 'favourites', 'favourites listed first');
+  const favIds = await page.locator('#emojiGrid .em').evaluateAll((els) => els.slice(0, 2).map((e) => e.dataset.id));
+  assert.deepStrictEqual(favIds, [fv[0], fv[1]], 'pinned in the order they were added');
+  await page.waitForTimeout(600);
+  assert.deepStrictEqual(JSON.parse(await page.evaluate(() => window.__ui)).favEmoji, [fv[0], fv[1]], 'favourites saved in settings');
+  await page.fill('#emojiSearch', 'zzzz-no-match');
+  assert.strictEqual(await page.locator('#emojiGrid .em').count(), 0, 'search also filters favourites');
+  await page.fill('#emojiSearch', '');
+  await page.locator(`#emojiGrid .em[data-id="${fv[0]}"]`).first().hover();
+  await page.locator(`#emojiGrid .em[data-id="${fv[0]}"] .fav`).first().click(); // unpin
+  assert.strictEqual(await page.locator('#emojiGrid .em.isfav').count(), 2, 'one favourite left (shown in Favourites and in its own group)');
+  assert.strictEqual(await page.locator('#emojiGrid .em').first().getAttribute('data-id'), fv[1]);
+  // an imported settings file brings its favourites
+  await page.evaluate((id) => { window.__import = JSON.stringify({ toolOpts: {}, favEmoji: [id] }); }, fv[2]);
   await page.keyboard.press('Escape');
+  await page.click('#bSettings'); await page.click('#menu [data-act="import"]');
+  await page.click('[data-tool="emoji"]');
+  assert.strictEqual(await page.locator('#emojiGrid .em').first().getAttribute('data-id'), fv[2], 'imported favourite pinned');
+  await page.keyboard.press('Escape');
+  await page.mouse.click(5, 400);
 
   // OCR sidebar: recognise, list, copy, place as SVG text
   await page.click('#bOcr');
