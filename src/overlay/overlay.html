@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ipc: http://ipc.localhost; img-src data:; style-src 'unsafe-inline'; script-src 'self'">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; cursor: crosshair; user-select: none; background: #000; }
   #bg { position: fixed; inset: 0; background-size: 100% 100%; }
@@ -20,6 +20,7 @@
 <div id="bg"></div><div id="dim"></div><div id="sel"></div>
 <div class="g" id="gv"></div><div class="g" id="gh"></div>
 <div id="lbl"></div><div id="hint">Drag to select a region &middot; Esc / right-click to cancel</div>
+<script src="../tauri-api.js"></script>
 <script src="overlay.js"></script>
 </body>
 </html>

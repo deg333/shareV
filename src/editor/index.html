@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ipc: http://ipc.localhost; img-src data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'">
 <title>ShareV</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -83,6 +83,7 @@
   </div>
 </main>
 <footer id="status"><span id="stInfo"></span><span id="stPos"></span></footer>
+<script src="../tauri-api.js"></script>
 <script src="editor.js"></script>
 </body>
 </html>

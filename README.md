@@ -28,17 +28,20 @@ annotation. The file also carries a `<metadata id="sharev-data">` block, so re-o
 restores every shape as editable. Other SVG editors/browsers just see normal SVG.
 Also: export PNG, copy to clipboard (`Ctrl+C`), open PNG/JPG/SVG.
 
-## Run / build
+## Run / build (Tauri 2)
+Needs Node, Rust, and on Linux `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev`
+(Windows needs the WebView2 runtime, preinstalled on Windows 10/11).
 ```bash
 npm install
-npm start                # run
-npm run dist:win         # Windows portable .exe  (dist/ShareV-<ver>-portable.exe)
-npm run dist:linux       # AppImage
+npm run dev              # run in dev mode
+npm run build            # single portable executable: src-tauri/target/release/sharev(.exe)
+npm run bundle           # installers (msi/nsis, deb/AppImage, dmg)
 npm test                 # headless editor tests (needs playwright)
 ```
-The `build` GitHub workflow produces the Windows portable exe on a tag or manual run.
+`sharev.exe` is portable: copy it anywhere; settings, screenshots and the WebView profile live in
+`ShareV-Data/` next to it. The `build` GitHub workflow produces the Windows exe on a tag or manual run.
 
 ## Platform notes
-* Active-window capture: Windows (PowerShell), Linux/X11 (`xdotool` must be installed), macOS (needs
-  Accessibility permission); otherwise it falls back to the full screen.
-* macOS needs Screen Recording permission; Wayland uses the system screen-share prompt.
+* Capture uses the `xcap` crate. Active window = the focused window, or the top-most normal window
+  if focus can't be determined. Wayland and macOS need the system screen-capture permission.
+* Only one instance should run at a time (a second one fails to register the hotkeys).
