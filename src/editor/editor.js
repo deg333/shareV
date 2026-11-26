@@ -12,7 +12,9 @@ const BOX = new Set(['rect', 'ellipse', 'textbox', 'balloon', 'highlight']);
 const TEXTY = new Set(['text', 'textbox', 'balloon']);
 
 const state = {
-  w: 0, h: 0, bg: '', shapes: [], sel: null, tool: 'select', zoom: 1,
+  w: 0, h: 0, bg: '', shapes: [], sels: [], marquee: null, tool: 'select', zoom: 1,
+  get sel() { return this.sels.length ? this.sels[this.sels.length - 1] : null; }, // primary selection
+  set sel(v) { this.sels = v == null ? [] : [v]; },
   undo: [], redo: [], nextId: 1, name: '', loaded: false, bz: null, bzHover: null, bzPre: '', stepOverride: null,
 };
 window.__state = state; // handy for tests / debugging
@@ -23,6 +25,7 @@ const num = (n) => Math.round(n * 100) / 100;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const snapshot = () => JSON.stringify(state.shapes, (k, v) => (k[0] === '_' ? undefined : v));
 const byId = (id) => state.shapes.find((s) => s.id === id);
+const selShapes = () => state.sels.map(byId).filter(Boolean);
 const mctx = document.createElement('canvas').getContext('2d');
 function measure(text, size, bold) {
   mctx.font = `${bold ? 'bold ' : ''}${size}px ${FONT}`;
@@ -346,15 +349,26 @@ function renderUI() {
     ui.innerHTML = out;
     return;
   }
-  const s = byId(state.sel);
-  if (!s || state.tool !== 'select') { ui.innerHTML = ''; return; }
+  if (state.tool !== 'select') { ui.innerHTML = ''; return; }
+  const sel = selShapes();
+  const mq = state.marquee;
+  const marquee = mq ? `<rect x="${mq.x}" y="${mq.y}" width="${mq.w}" height="${mq.h}" fill="rgba(77,163,255,.15)" stroke="#4da3ff" stroke-width="${1 / z}" pointer-events="none"/>` : '';
+  if (sel.length !== 1) {
+    const pad = 3 / z;
+    ui.innerHTML = sel.map((sh) => {
+      const b = bounds(sh);
+      return `<rect x="${b.x - pad}" y="${b.y - pad}" width="${b.w + 2 * pad}" height="${b.h + 2 * pad}" fill="none" stroke="#4da3ff" stroke-width="${1 / z}" stroke-dasharray="${4 / z} ${3 / z}" pointer-events="none"/>`;
+    }).join('') + marquee;
+    return;
+  }
+  const s = sel[0];
   const b = bounds(s), pad = 3 / z, hs = 9 / z;
   let out = `<rect x="${b.x - pad}" y="${b.y - pad}" width="${b.w + 2 * pad}" height="${b.h + 2 * pad}" fill="none" stroke="#4da3ff" stroke-width="${1 / z}" stroke-dasharray="${4 / z} ${3 / z}" pointer-events="none"/>`;
   if (s.type === 'bezier') out += bezierGuides(s, true, z);
   for (const [name, [px, py]] of Object.entries(handlePoints(s))) {
     out += `<rect data-h="${name}" x="${px - hs / 2}" y="${py - hs / 2}" width="${hs}" height="${hs}" fill="${name === 'tail' ? '#ffb020' : '#fff'}" stroke="#2677d4" stroke-width="${1 / z}" style="cursor:${HANDLE_CURSOR[name]}"/>`;
   }
-  ui.innerHTML = out;
+  ui.innerHTML = out + marquee;
 }
 
 // ------------------------------------------------------------------ document
@@ -431,7 +445,7 @@ function pushUndo(pre) {
 function restore(json) {
   state.shapes = JSON.parse(json);
   state.nextId = state.shapes.reduce((m, s) => Math.max(m, s.id), 0) + 1;
-  if (!byId(state.sel)) state.sel = null;
+  state.sels = state.sels.filter(byId);
   render(); syncProps(); refreshNum();
 }
 function undo() { if (!state.undo.length) return; commitEdit(); state.redo.push(snapshot()); restore(state.undo.pop()); }
@@ -439,7 +453,7 @@ function redo() { if (!state.redo.length) return; commitEdit(); state.undo.push(
 function updateButtons() {
   $('bUndo').disabled = !state.undo.length;
   $('bRedo').disabled = !state.redo.length;
-  $('bDel').disabled = !state.sel;
+  $('bDel').disabled = !state.sels.length;
   const has = state.loaded;
   for (const id of ['bSave', 'bSaveAs', 'bPng', 'bCopy']) $(id).disabled = !has;
 }
@@ -499,15 +513,20 @@ function refreshNum() { if (state.tool === 'step') P.num.value = nextStep(); }
 /** The tool whose options the toolbar currently edits: the active tool, or the selected shape's type. */
 function ctxType() {
   if (state.tool !== 'select') return state.tool;
-  const s = byId(state.sel);
-  return s ? s.type : null;
+  const ts = [...new Set(selShapes().map((s) => s.type))];
+  return ts.length === 1 ? ts[0] : ts.length ? 'mixed' : null;
+}
+function relevantKeys(type) {
+  if (type !== 'mixed') return RELEVANT[type] || [];
+  return [...new Set(selShapes().flatMap((s) => RELEVANT[s.type] || []))];
 }
 function updateControls() {
   const type = ctxType();
+  const rel = relevantKeys(type);
   for (const k of Object.keys(P)) {
     const label = P[k].closest('label');
     const base = /A$/.test(k) && k !== 'fillOn' ? k.slice(0, -1) : k; // opacity sliders follow their colour
-    label.hidden = !type || !RELEVANT[type] || !RELEVANT[type].includes(base); // nothing selected: no options
+    label.hidden = !type || !rel.includes(base) || (base === 'num' && state.tool === 'select' && state.sels.length > 1);
   }
   const first = P.stroke.closest('label').firstChild;
   if (first && first.nodeType === 3) first.nodeValue = (STROKE_LABEL[type] || 'Line') + ' ';
@@ -557,14 +576,20 @@ function onProp(key) {
     const store = isAlpha ? clamp((+v || 0) / 100, 0, 1) : ['width', 'size', 'headSize'].includes(key) ? +v || 0 : v;
     if (isAlpha) el.title = el.title.replace(/ \d+%$/, '') + ` ${Math.round(store * 100)}%`;
     // remember the value for the tool (or the selected shape's tool) it belongs to
-    const type = ctxType();
-    if (type && toolOpts[type] && KEYMAP[key] && KEYMAP[key] in toolOpts[type]) {
-      toolOpts[type][KEYMAP[key]] = store;
-      persistOpts();
+    const ctx = ctxType();
+    const types = ctx === 'mixed' ? [...new Set(selShapes().map((x) => x.type))] : [ctx];
+    for (const type of types) {
+      if (type && toolOpts[type] && KEYMAP[key] && KEYMAP[key] in toolOpts[type]) toolOpts[type][KEYMAP[key]] = store;
     }
-    const s = byId(state.sel);
-    if (!s || state.tool !== 'select') return;
+    persistOpts();
+    if (state.tool !== 'select' || !state.sels.length) return;
     if (propPre === null) propPre = snapshot();
+    for (const s of selShapes()) applyProp(s, key, v, store);
+    render();
+  };
+}
+function applyProp(s, key, v, store) {
+  {
     switch (key) {
       case 'stroke': if ('stroke' in s) s.stroke = v; break;
       case 'fill': if (s.type === 'highlight' || (s.fill && s.fill !== 'none')) s.fill = v; break;
@@ -572,7 +597,7 @@ function onProp(key) {
       case 'text': if (TEXTY.has(s.type)) s.tc = v; break;
       case 'width': if ('sw' in s) s.sw = clamp(+v || 0, ['text', 'highlight', 'step'].includes(s.type) ? 0 : 1, 60); break;
       case 'size': if ('size' in s) s.size = clamp(+v || 12, 6, 400); break;
-      case 'num': if (s.type === 'step') s.n = Math.max(0, Math.round(+v || 0)); break;
+      case 'num': if (s.type === 'step' && state.sels.length === 1) s.n = Math.max(0, Math.round(+v || 0)); break;
       case 'bold': if ('bold' in s) s.bold = v; break;
       case 'strokeA': s.sa = store; break;
       case 'fillA': s.fa = store; break;
@@ -581,8 +606,7 @@ function onProp(key) {
       case 'headEnd': if (HEADY.has(s.type)) s.he = v; break;
       case 'headSize': if (HEADY.has(s.type)) s.hz = clamp(+v || 20, 4, 200); break;
     }
-    render();
-  };
+  }
 }
 for (const k of Object.keys(P)) {
   P[k].addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === 'Escape') P[k].blur(); });
@@ -702,14 +726,29 @@ svg.addEventListener('pointerdown', (e) => {
   if (state.tool === 'select') {
     const h = e.target.dataset && e.target.dataset.h;
     const hitEl = e.target.closest && e.target.closest('[data-id]');
-    if (h && byId(state.sel)) {
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    if (h && state.sels.length === 1 && byId(state.sel)) {
       drag = { kind: 'resize', pre, handle: h, s: byId(state.sel), orig: JSON.parse(pre).find((x) => x.id === state.sel) };
     } else if (hitEl) {
-      state.sel = +hitEl.dataset.id;
-      drag = { kind: 'move', pre, start: p, s: byId(state.sel), orig: JSON.parse(pre).find((x) => x.id === state.sel), moved: false };
+      const id = +hitEl.dataset.id;
+      if (additive) {
+        // shift/ctrl-click toggles membership in the selection
+        state.sels = state.sels.includes(id) ? state.sels.filter((x) => x !== id) : [...state.sels, id];
+      } else if (!state.sels.includes(id)) {
+        state.sel = id; // clicking a member of a multi-selection keeps it, so the group can be dragged
+      } else {
+        state.sels = [...state.sels.filter((x) => x !== id), id]; // make it the primary
+      }
       syncProps();
+      if (state.sels.includes(id)) {
+        const all = JSON.parse(pre);
+        drag = { kind: 'move', pre, start: p, moved: false, ids: [...state.sels], origs: Object.fromEntries(all.filter((x) => state.sels.includes(x.id)).map((x) => [x.id, x])) };
+      }
     } else {
-      state.sel = null;
+      // empty canvas: rubber-band selection (shift/ctrl adds to the current selection)
+      if (!additive) state.sels = [];
+      drag = { kind: 'marquee', start: p, base: [...state.sels] };
+      syncProps();
     }
     render();
     if (!drag) return;
@@ -732,7 +771,13 @@ svg.addEventListener('pointermove', (e) => {
     return;
   }
   const { s } = drag;
-  if (drag.kind === 'bnode') {
+  if (drag.kind === 'marquee') {
+    const r = { x: Math.min(drag.start.x, p.x), y: Math.min(drag.start.y, p.y), w: Math.abs(p.x - drag.start.x), h: Math.abs(p.y - drag.start.y) };
+    state.marquee = r;
+    const hit = state.shapes.filter((sh) => { const b = bounds(sh); return b.x <= r.x + r.w && b.x + b.w >= r.x && b.y <= r.y + r.h && b.y + b.h >= r.y; }).map((sh) => sh.id);
+    state.sels = [...drag.base.filter((id) => !hit.includes(id)), ...hit];
+    syncProps();
+  } else if (drag.kind === 'bnode') {
     drag.node.hx = p.x; drag.node.hy = p.y;
   } else if (drag.kind === 'create') {
     if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) * state.zoom > 3) drag.moved = true;
@@ -752,7 +797,7 @@ svg.addEventListener('pointermove', (e) => {
     const dx = p.x - drag.start.x, dy = p.y - drag.start.y;
     if (!drag.moved && Math.hypot(dx, dy) * state.zoom < 3) return;
     drag.moved = true;
-    moveBy(s, drag.orig, dx, dy);
+    for (const id of drag.ids) { const sh = byId(id); if (sh) moveBy(sh, drag.origs[id], dx, dy); }
   } else if (drag.kind === 'resize') {
     const o = drag.orig, h = drag.handle;
     if (s.type === 'bezier') {
@@ -780,6 +825,7 @@ function endDrag() {
   const d = drag; drag = null;
   const s = d.s;
   if (d.kind === 'bnode') { render(); return; }
+  if (d.kind === 'marquee') { state.marquee = null; syncProps(); render(); return; }
   if (d.kind === 'create') {
     if (s.type === 'step') { // stays on the tool: every click drops the next number
       pushUndo(d.pre); state.sel = s.id; render(); refreshNum(); return;
@@ -886,36 +932,40 @@ ta.addEventListener('keydown', (e) => {
 
 // ------------------------------------------------------------------ actions
 function deleteSel() {
-  const s = byId(state.sel);
-  if (!s) return;
+  const sel = selShapes();
+  if (!sel.length) return;
   const pre = snapshot();
-  state.shapes = state.shapes.filter((x) => x !== s);
+  state.shapes = state.shapes.filter((x) => !sel.includes(x));
   state.sel = null;
-  pushUndo(pre); render();
+  pushUndo(pre); render(); syncProps();
 }
 function duplicateSel() {
-  const s = byId(state.sel);
-  if (!s) return;
+  const sel = selShapes();
+  if (!sel.length) return;
   const pre = snapshot();
-  const c = JSON.parse(JSON.stringify(s, (k, v) => (k[0] === '_' ? undefined : v)));
-  c.id = state.nextId++;
-  moveBy(c, s, 16, 16);
-  state.shapes.push(c); state.sel = c.id;
+  const ids = [];
+  for (const s of sel) {
+    const c = JSON.parse(JSON.stringify(s, (k, v) => (k[0] === '_' ? undefined : v)));
+    c.id = state.nextId++;
+    moveBy(c, s, 16, 16);
+    state.shapes.push(c); ids.push(c.id);
+  }
+  state.sels = ids;
   pushUndo(pre); render();
 }
 function reorder(dir) {
-  const i = state.shapes.findIndex((x) => x.id === state.sel);
-  if (i < 0) return;
+  const sel = state.shapes.filter((x) => state.sels.includes(x.id)); // keep their relative order
+  if (!sel.length) return;
   const pre = snapshot();
-  const [s] = state.shapes.splice(i, 1);
-  state.shapes.splice(dir > 0 ? state.shapes.length : 0, 0, s);
+  const rest = state.shapes.filter((x) => !sel.includes(x));
+  state.shapes = dir > 0 ? [...rest, ...sel] : [...sel, ...rest];
   pushUndo(pre); render();
 }
 function nudge(dx, dy) {
-  const s = byId(state.sel);
-  if (!s) return;
+  const sel = selShapes();
+  if (!sel.length) return;
   const pre = snapshot();
-  moveBy(s, JSON.parse(JSON.stringify(s)), dx, dy);
+  for (const s of sel) moveBy(s, JSON.parse(JSON.stringify(s)), dx, dy);
   pushUndo(pre); render();
 }
 
@@ -999,6 +1049,7 @@ addEventListener('keydown', (e) => {
     else if (k === 'o') openFile();
     else if (k === 'c') copyImage();
     else if (k === 'd') duplicateSel();
+    else if (k === 'a') { state.tool === 'select' && (state.sels = state.shapes.map((x) => x.id)); syncProps(); render(); }
     else if (k === ']') reorder(1);
     else if (k === '[') reorder(-1);
     else if (k === '0') fit();
@@ -1017,8 +1068,8 @@ addEventListener('keydown', (e) => {
   }
   if (k === 'delete' || k === 'backspace') { deleteSel(); e.preventDefault(); }
   else if (k === 'escape') { state.sel = null; setTool('select'); render(); }
-  else if (k === 'enter') { const s = byId(state.sel); if (s && TEXTY.has(s.type)) { startEdit(s, snapshot(), false); e.preventDefault(); } }
-  else if (k.startsWith('arrow') && state.sel) {
+  else if (k === 'enter') { const s = state.sels.length === 1 && byId(state.sel); if (s && TEXTY.has(s.type)) { startEdit(s, snapshot(), false); e.preventDefault(); } }
+  else if (k.startsWith('arrow') && state.sels.length) {
     const d = e.shiftKey ? 10 : 1;
     nudge(k === 'arrowleft' ? -d : k === 'arrowright' ? d : 0, k === 'arrowup' ? -d : k === 'arrowdown' ? d : 0);
     e.preventDefault();

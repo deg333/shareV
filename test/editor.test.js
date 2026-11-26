@@ -128,6 +128,30 @@ const SHOT = process.env.SHOT; // optional screenshot path
   const after = await page.evaluate(() => ({ ...window.__state.shapes[0] }));
   assert.ok(Math.abs(after.x - before.x - 20) < 2 && Math.abs(after.y - before.y - 20) < 2, 'rect moved by drag');
 
+  // multi-select: rubber-band both shapes, change an option for all, nudge them together
+  await page.keyboard.press('Escape');
+  svgBox = await page.locator('#svg').boundingBox();
+  await page.mouse.move(...at(440, 40)); await page.mouse.down(); await page.mouse.move(...at(600, 100), { steps: 3 }); await page.mouse.move(...at(780, 155), { steps: 3 }); await page.mouse.up();
+  const picked = await page.evaluate(() => window.__state.sels.map((id) => window.__state.shapes.find((s) => s.id === id).type).sort());
+  assert.deepStrictEqual(picked, ['ellipse', 'rect'], 'marquee selects both');
+  await page.fill('#pStroke', '#00ff00');
+  const strokes = await page.evaluate(() => window.__state.shapes.filter((s) => ['rect', 'ellipse'].includes(s.type)).map((s) => s.stroke));
+  assert.deepStrictEqual(strokes, ['#00ff00', '#00ff00'], 'option applied to all selected');
+  await page.fill('#pWidth', '7'); await page.press('#pWidth', 'Enter');
+  const widths = await page.evaluate(() => window.__state.shapes.filter((s) => ['rect', 'ellipse'].includes(s.type)).map((s) => s.sw));
+  assert.deepStrictEqual(widths, [7, 7]);
+  const x0 = await page.evaluate(() => window.__state.shapes.filter((s) => ['rect', 'ellipse'].includes(s.type)).map((s) => s.x));
+  await page.keyboard.press('Shift+ArrowRight');
+  const x1 = await page.evaluate(() => window.__state.shapes.filter((s) => ['rect', 'ellipse'].includes(s.type)).map((s) => s.x));
+  assert.deepStrictEqual(x1, x0.map((x) => x + 10), 'nudged together');
+  // shift-click toggles one out of the selection
+  await page.keyboard.down('Shift'); await page.mouse.click(...at(480, 100)); await page.keyboard.up('Shift');
+  assert.strictEqual(await page.evaluate(() => window.__state.sels.length), 1, 'shift-click removes from selection');
+  await page.keyboard.press('Control+a');
+  assert.strictEqual(await page.evaluate(() => window.__state.sels.length === window.__state.shapes.length), true, 'select all');
+  await page.keyboard.press('Escape');
+  await page.mouse.click(...at(480, 100)); // re-select the rectangle for the delete/undo checks below
+
   // undo / redo
   const n = (await types()).length;
   await page.keyboard.press('Delete');

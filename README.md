@@ -59,3 +59,7 @@ Errors (e.g. a hotkey that could not be registered) are written to `ShareV-Data/
 **Step tool (`N`)**: every click drops a red numbered circle (1, 2, 3 …). The next number is shown in the
 "No." box and can be changed before clicking; colours, size and border are per-tool options. Select a
 step to change its own number.
+
+**Multi-select**: drag a rubber band on empty canvas, Shift/Ctrl-click to add or remove shapes, `Ctrl+A` for all.
+Option changes (colour, width, opacity, font, arrowheads…) apply to every selected shape that has that option;
+drag, arrow-key nudge, `Ctrl+D`, `Ctrl+]`/`[` and `Del` work on the whole selection.
