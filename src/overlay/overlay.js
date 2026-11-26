@@ -3,7 +3,24 @@ const $ = (id) => document.getElementById(id);
 const sel = $('sel'), dim = $('dim'), lbl = $('lbl'), gv = $('gv'), gh = $('gh');
 let start = null, rect = null, finished = false;
 
-window.api.overlayInit().then((d) => { if (d) $('bg').style.backgroundImage = `url(${d.url})`; });
+// The window is created once and re-used: reset all state whenever a new screenshot arrives.
+function reset() {
+  start = rect = null; finished = false;
+  sel.style.display = lbl.style.display = 'none';
+  dim.style.display = '';
+  $('hint').style.display = '';
+}
+async function setImage(url) {
+  reset();
+  const im = new Image();
+  im.src = url;
+  try { await im.decode(); } catch { /* show it anyway */ }
+  $('bg').style.backgroundImage = `url(${url})`;
+  window.api.overlayReady(); // the backend positions and shows the window once the picture is ready
+}
+const fetchImage = () => window.api.overlayInit().then((d) => { if (d) setImage(d.url); });
+if (window.api.onOverlayPending) window.api.onOverlayPending(fetchImage);
+fetchImage();
 
 const finish = (r) => { if (!finished) { finished = true; window.api.overlayDone(r); } };
 

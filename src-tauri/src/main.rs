@@ -79,6 +79,11 @@ struct Editor {
 struct Overlay {
     url: String,
     tx: Option<oneshot::Sender<Option<RegionIn>>>,
+    // monitor geometry in xcap units (physical px; points on macOS)
+    mx: i32,
+    my: i32,
+    mw: u32,
+    mh: u32,
 }
 struct Shared {
     data_dir: PathBuf,
@@ -146,10 +151,17 @@ fn png_url(img: &RgbaImage) -> Result<String, String> {
     img.write_to(&mut buf, ImageFormat::Png).map_err(|e| e.to_string())?;
     Ok(format!("data:image/png;base64,{}", B64.encode(buf.into_inner())))
 }
-fn jpeg_url(img: &RgbaImage) -> Result<String, String> {
-    let rgb = image::DynamicImage::ImageRgba8(img.clone()).to_rgb8();
+/// The overlay only needs the picture at the size it is displayed (CSS px): shrink HiDPI captures first, which
+/// makes the JPEG encode and the transfer to the webview several times cheaper.
+fn overlay_jpeg(img: &RgbaImage, scale: f32) -> Result<String, String> {
+    let rgb = if scale > 1.05 {
+        let (w, h) = ((img.width() as f32 / scale).round() as u32, (img.height() as f32 / scale).round() as u32);
+        image::DynamicImage::ImageRgba8(image::imageops::resize(img, w.max(1), h.max(1), image::imageops::FilterType::Triangle)).to_rgb8()
+    } else {
+        image::DynamicImage::ImageRgba8(img.clone()).to_rgb8()
+    };
     let mut buf = Vec::new();
-    JpegEncoder::new_with_quality(&mut buf, 90).encode_image(&rgb).map_err(|e| e.to_string())?;
+    JpegEncoder::new_with_quality(&mut buf, 85).encode_image(&rgb).map_err(|e| e.to_string())?;
     Ok(format!("data:image/jpeg;base64,{}", B64.encode(buf)))
 }
 fn decode_url(url: &str) -> Result<Vec<u8>, String> {
@@ -169,6 +181,9 @@ struct Shot {
     img: RgbaImage,
     mx: i32,
     my: i32,
+    mw: u32,
+    mh: u32,
+    scale: f32,
 }
 
 fn cursor_point(app: &AppHandle) -> Option<(i32, i32)> {
@@ -182,7 +197,14 @@ fn shot_at_point(point: Option<(i32, i32)>) -> Result<Shot, String> {
         None => xcap::Monitor::all().map_err(|e| e.to_string())?.into_iter().next().ok_or("No monitor found")?,
     };
     let img = mon.capture_image().map_err(|e| e.to_string())?;
-    Ok(Shot { img, mx: mon.x().unwrap_or(0), my: mon.y().unwrap_or(0) })
+    Ok(Shot {
+        img,
+        mx: mon.x().unwrap_or(0),
+        my: mon.y().unwrap_or(0),
+        mw: mon.width().unwrap_or(0),
+        mh: mon.height().unwrap_or(0),
+        scale: mon.scale_factor().unwrap_or(1.0),
+    })
 }
 
 fn shot_by_origin(mx: i32, my: i32) -> Result<Shot, String> {
@@ -193,7 +215,14 @@ fn shot_by_origin(mx: i32, my: i32) -> Result<Shot, String> {
         .or_else(|| mons.first())
         .ok_or("No monitor found")?;
     let img = mon.capture_image().map_err(|e| e.to_string())?;
-    Ok(Shot { img, mx: mon.x().unwrap_or(0), my: mon.y().unwrap_or(0) })
+    Ok(Shot {
+        img,
+        mx: mon.x().unwrap_or(0),
+        my: mon.y().unwrap_or(0),
+        mw: mon.width().unwrap_or(0),
+        mh: mon.height().unwrap_or(0),
+        scale: mon.scale_factor().unwrap_or(1.0),
+    })
 }
 
 fn active_window_image(include_self: bool) -> Option<RgbaImage> {
@@ -238,14 +267,13 @@ async fn capture_inner(app: &AppHandle, mode: &str) -> Result<Option<RgbaImage>,
     }
 }
 
-async fn region(app: &AppHandle, point: Option<(i32, i32)>) -> Result<Option<RgbaImage>, String> {
-    let Shot { img: full, mx, my } = blocking(move || shot_at_point(point)).await??;
-    let (mw, mh) = (full.width(), full.height());
-    let (tx, rx) = oneshot::channel();
-    *shared(app).overlay.lock().unwrap() = Some(Overlay { url: jpeg_url(&full)?, tx: Some(tx) });
-    let data_dir = shared(app).data_dir.join("webview");
-    let win = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay/overlay.html".into()))
-        .data_directory(data_dir)
+/// The region-picker window is created once (hidden) and re-used: creating a WebView2 window per capture is slow.
+fn ensure_overlay(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(w) = app.get_webview_window("overlay") {
+        return Ok(w);
+    }
+    WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay/overlay.html".into()))
+        .data_directory(shared(app).data_dir.join("webview"))
         .decorations(false)
         .resizable(false)
         .always_on_top(true)
@@ -253,23 +281,21 @@ async fn region(app: &AppHandle, point: Option<(i32, i32)>) -> Result<Option<Rgb
         .shadow(false)
         .visible(false)
         .build()
-        .map_err(|e| e.to_string())?;
-    // xcap reports points on macOS and physical pixels elsewhere
-    #[cfg(target_os = "macos")]
-    {
-        let _ = win.set_position(tauri::LogicalPosition::new(mx as f64, my as f64));
-        let _ = win.set_size(tauri::LogicalSize::new(mw as f64, mh as f64));
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = win.set_position(tauri::PhysicalPosition::new(mx, my));
-        let _ = win.set_size(tauri::PhysicalSize::new(mw, mh));
-    }
-    let _ = win.show();
-    let _ = win.set_focus();
+        .map_err(|e| e.to_string())
+}
+
+async fn region(app: &AppHandle, point: Option<(i32, i32)>) -> Result<Option<RgbaImage>, String> {
+    let Shot { img: full, mx, my, mw, mh, scale } = blocking(move || shot_at_point(point)).await??;
+    let for_overlay = full.clone();
+    let url = blocking(move || overlay_jpeg(&for_overlay, scale)).await??;
+    let (tx, rx) = oneshot::channel();
+    *shared(app).overlay.lock().unwrap() = Some(Overlay { url, tx: Some(tx), mx, my, mw, mh });
+    let win = ensure_overlay(app)?;
+    // a page that is already loaded is told to fetch the picture; a freshly created one asks for it on load
+    let _ = app.emit_to("overlay", "overlay-pending", ());
 
     let rect = rx.await.ok().flatten();
-    let _ = win.destroy();
+    let _ = win.hide();
     *shared(app).overlay.lock().unwrap() = None;
 
     let Some(r) = rect else { return Ok(None) };
@@ -302,7 +328,9 @@ async fn do_capture(app: AppHandle, mode: String) {
     for w in &hidden {
         let _ = w.hide();
     }
-    tokio::time::sleep(Duration::from_millis(if keep_self { 80 } else { 350 })).await;
+    if !hidden.is_empty() {
+        tokio::time::sleep(Duration::from_millis(150)).await; // let the compositor drop the hidden windows
+    }
     for left in (1..=delay).rev() {
         let _ = app.emit("capture-tick", left);
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -365,21 +393,41 @@ fn open_editor(app: &AppHandle, payload: Option<String>) {
             }
         }
     }
+    build_editor(app, payload, true);
+    spawn_spare_editor(app);
+}
+
+fn build_editor(app: &AppHandle, payload: Option<String>, visible: bool) {
+    let sh = shared(app);
     let label = format!("editor-{}", sh.counter.fetch_add(1, Ordering::SeqCst));
-    sh.editors.lock().unwrap().insert(
-        label.clone(),
-        Editor { empty: payload.is_none(), payload, path: None },
-    );
+    sh.editors.lock().unwrap().insert(label.clone(), Editor { empty: payload.is_none(), payload, path: None });
     let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("editor/index.html".into()))
         .title("ShareV")
         .inner_size(1280.0, 860.0)
         .min_inner_size(760.0, 480.0)
+        .visible(visible)
         .data_directory(sh.data_dir.join("webview"))
         .build();
     if let Err(e) = built {
         sh.editors.lock().unwrap().remove(&label);
         error_box(app, &format!("Could not open editor: {e}"));
     }
+}
+
+/// Keep one blank, hidden editor window loaded and ready: a capture then only has to hand it the image and show it,
+/// instead of paying for a whole new WebView2 window at hotkey time.
+fn spawn_spare_editor(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let has_blank = {
+            let sh = shared(&app);
+            let eds = sh.editors.lock().unwrap();
+            eds.iter().any(|(l, e)| e.empty && app.get_webview_window(l).is_some())
+        };
+        if !has_blank {
+            build_editor(&app, None, false);
+        }
+    });
 }
 
 #[tauri::command]
@@ -755,6 +803,27 @@ async fn overlay_init(app: AppHandle) -> Option<Value> {
     shared(&app).overlay.lock().unwrap().as_ref().map(|o| json!({ "url": o.url }))
 }
 
+/// Called by the overlay page once the screenshot is decoded: place the window over the monitor and show it.
+#[tauri::command]
+async fn overlay_ready(app: AppHandle) {
+    let g = shared(&app).overlay.lock().unwrap().as_ref().map(|o| (o.mx, o.my, o.mw, o.mh));
+    if let (Some((mx, my, mw, mh)), Some(win)) = (g, app.get_webview_window("overlay")) {
+        // xcap reports points on macOS and physical pixels elsewhere
+        #[cfg(target_os = "macos")]
+        {
+            let _ = win.set_position(tauri::LogicalPosition::new(mx as f64, my as f64));
+            let _ = win.set_size(tauri::LogicalSize::new(mw as f64, mh as f64));
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = win.set_position(tauri::PhysicalPosition::new(mx, my));
+            let _ = win.set_size(tauri::PhysicalSize::new(mw, mh));
+        }
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
 #[tauri::command]
 async fn overlay_done(app: AppHandle, rect: Option<RegionIn>) {
     if let Some(tx) = shared(&app).overlay.lock().unwrap().as_mut().and_then(|o| o.tx.take()) {
@@ -972,7 +1041,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             capture, editor_init, editor_state, editor_title, save_svg, export_png, copy_png, open_file,
-            open_folder, overlay_init, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text, get_capture_opts, set_capture_opts, emoji_list, emoji_save, emoji_delete, emoji_import
+            open_folder, overlay_init, overlay_ready, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text, get_capture_opts, set_capture_opts, emoji_list, emoji_save, emoji_delete, emoji_import
         ])
         .setup(|app| {
             let data_dir = resolve_data_dir(app);
@@ -998,10 +1067,18 @@ fn main() {
             save_settings(&shared(app.handle()));
             let tray_ok = build_tray(app, &hk).is_ok();
             register_hotkeys(app.handle(), &hk);
+            let h = app.handle().clone();
             if !std::env::args().any(|a| a == "--tray") || !tray_ok {
-                let h = app.handle().clone();
                 tauri::async_runtime::spawn(async move { open_editor(&h, None) });
+            } else {
+                spawn_spare_editor(&h);
             }
+            // warm up the region picker so the first PrintScreen is as fast as the rest
+            let h2 = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                let _ = ensure_overlay(&h2);
+            });
             Ok(())
         })
         .build(tauri::generate_context!())

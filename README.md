@@ -97,3 +97,7 @@ screenshot is taken (time to open a menu or tooltip), and tick "include ShareV" 
 the region / full-screen / window capture can include them. Both settings apply to the hotkeys too and are stored in
 `ShareV-Data/settings.json` (`captureDelay`, `captureSelf`). The emoji favourites default to ❌ ✔ 😊 🤣 😬 🤯 until you
 change them.
+
+**Hotkey speed**: the region picker window and a blank editor window are kept loaded (hidden) in the background, ShareV
+only waits for its windows to hide when one was actually visible, and the region picker gets a screenshot shrunk to its
+displayed size. The first capture after starting ShareV can still be slightly slower while those warm up.

@@ -29,6 +29,8 @@
     saveUi: (json) => invoke('ui_save', { json }),
     exportUi: (json) => invoke('ui_export', { json }),
     importUi: () => invoke('ui_import'),
+    onOverlayPending: (cb) => listen('overlay-pending', () => cb()),
+    overlayReady: () => invoke('overlay_ready'),
     overlayInit: () => invoke('overlay_init'),
     overlayDone: (rect) => invoke('overlay_done', { rect: rect ? { ...rect, vw: window.innerWidth } : null }),
   };
