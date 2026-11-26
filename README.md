@@ -120,3 +120,13 @@ first click and applies on each further click (Shift-click picks a new style, `E
   (N·m, lbf·ft, kgf·m…). Type in either box; the other updates. Adjustable digits, swap button.
 - *History* (both tabs): click a result to insert it, click an expression/entry to reload it; hover for copy result /
   copy "expression = result" / delete. Histories are saved with your settings (`ShareV-Data/ui-settings.json`).
+
+**Crank & slider simulator (`F3` or the Sim button)**: an animated slider-crank mechanism with all four inversions
+(frame / crank / connecting rod / slider fixed), presets (IC Engine, Offset Engine, Quick Return, Rotary Engine, Osc.
+Cylinder, Hand Pump), sliders for crank r, rod l, offset e and speed (rpm), SI or Imperial units, and graphs of x(θ),
+v(θ), a(θ) and crank torque T(θ) (set the slider force and mass). Live readouts: θ₂, φ, x, v, a, stroke, N = l/r and
+the quick-return time ratio. The **"The maths"** panel works every quantity through with your current numbers:
+`sin φ = (r·sin θ − e)/l`, `x = r·cos θ + l·cos φ`, `v = −r·ω·sin(θ+φ)/cos φ`, accelerations, dead centres
+`√((l±r)² − e²)`, `Q = (180°+α)/(180°−α)` and `T = (F − m·a)·dx/dθ`. Space runs/pauses, ← → step (Shift = 10°), click
+the graph to set θ₂. The maths is unit-tested against finite differences and the reference values
+(r = 40, l = 120, θ = 18°, 20 rpm → φ = 5.91°, x = 157.4 mm, v = −34.1 mm/s, a = −215 mm/s²).

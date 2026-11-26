@@ -478,6 +478,53 @@ const SHOT = process.env.SHOT; // optional screenshot path
   assert.ok((await page.evaluate(() => window.__sharev.buildSvg())).includes('Hello window'), 'recognised text is real SVG text');
   await page.click('#sideClose');
 
+  // crank & slider simulator
+  await page.click('#bSim');
+  assert.ok(await page.locator('#sim').isVisible());
+  const cards = async () => page.locator('#readouts .rv').allInnerTexts();
+  const rd = await cards();
+  assert.deepStrictEqual(rd.slice(0, 2), ['18.0°', '5.91°'], 'theta2 and phi match the reference simulator');
+  assert.ok(Math.abs(parseFloat(rd[2]) - 157.41) < 0.02 && Math.abs(parseFloat(rd[3]) - -34.1) < 0.1 && Math.abs(parseFloat(rd[4]) - -215) < 0.3, 'x, v, a at 18 deg, 20 rpm');
+  assert.deepStrictEqual(rd.slice(5), ['80.0', '3.00', '1.000'], 'stroke, N = l/r, time ratio');
+  assert.ok((await page.locator('#mathBody').innerText()).includes('5.912°'), 'the maths shows the working');
+  assert.ok((await page.locator('#mathBody').innerText()).includes('157.4'), 'x worked through');
+  // run: the crank advances; Space pauses
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(700);
+  await page.keyboard.press(' ');
+  const th1 = parseFloat((await cards())[0]);
+  assert.ok(th1 > 18.5, 'animation advanced: ' + th1);
+  await page.keyboard.press('ArrowRight');
+  assert.ok(Math.abs(parseFloat((await cards())[0]) - (th1 + 1)) < 0.2, 'arrow key steps 1 degree');
+  // inversions and presets
+  await page.click('#segInv [data-inv="3"]');
+  assert.ok((await page.locator('#pillInv').innerText()).includes('link 3'));
+  assert.ok((await page.locator('#mathBody').innerText()).includes('Newton'), 'inversion 3 explains the rod-relative drive');
+  await page.click('#presets [data-p="Offset Engine"]');
+  assert.ok(parseFloat((await cards())[7]) > 1.05, 'offset gives a quick-return time ratio > 1');
+  await page.click('#presets [data-p="Quick Return"]');
+  assert.ok(parseFloat((await cards())[7]) > 1.5);
+  // units
+  await page.click('#presets [data-p="IC Engine"]');
+  await page.click('#segUnits [data-u="Imperial"]');
+  assert.ok(Math.abs(parseFloat((await cards())[5]) - 80 / 25.4) < 0.05, 'stroke in inches');
+  assert.ok((await page.locator('#val_r').innerText()).includes('in'));
+  await page.click('#segUnits [data-u="SI"]');
+  // sliders keep the linkage assemblable (l >= r + |e|)
+  await page.locator('#sl_r').evaluate((el) => { el.value = 100; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  const lNow = parseFloat(await page.inputValue('#sl_l'));
+  assert.ok(lNow >= 100, 'rod lengthened with the crank: ' + lNow);
+  // graphs
+  for (const g of ['v', 'a', 'T', 'x']) { await page.click(`#segGraph [data-g="${g}"]`); assert.ok((await page.locator('#simGraph path').count()) >= 1, 'graph ' + g); }
+  await page.click('#btnShow');
+  assert.ok(await page.locator('#graphCard').isHidden());
+  await page.click('#btnShow');
+  await page.keyboard.press('Escape');
+  assert.ok(await page.locator('#sim').isHidden(), 'Esc closes the simulator');
+  await page.keyboard.press('F3');
+  assert.ok(await page.locator('#sim').isVisible(), 'F3 opens it');
+  await page.keyboard.press('F3');
+
   if (SHOT) { await page.keyboard.press('Escape'); await page.screenshot({ path: SHOT }); }
   assert.deepStrictEqual(errors, [], 'no page errors');
   await browser.close();

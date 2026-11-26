@@ -40,6 +40,7 @@
     <button id="bDel" title="Delete selected (Del)"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
   </div>
   <div class="grow"></div>
+  <button id="bSim" title="Crank &amp; slider simulator (F3)"><svg viewBox="0 0 24 24"><circle cx="7" cy="14" r="3"/><path d="M7 14l5-6"/><circle cx="12" cy="8" r="1.6"/><path d="M12 8l7 3"/><rect x="16" y="9.5" width="5" height="4" rx="1"/><path d="M3 19h18"/></svg><span>Sim</span></button>
   <button id="bCalc" title="Calculator and unit converter (F2)"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><rect x="8" y="6" width="8" height="3"/><path d="M8.5 13h.01M12 13h.01M15.5 13h.01M8.5 16.5h.01M12 16.5h.01M15.5 16.5h.01" stroke-width="2.4"/></svg><span>Calc</span></button>
   <button id="bOcr" title="Recognise text (OCR) and show it in the sidebar"><svg viewBox="0 0 24 24"><path d="M4 8V5h3M17 5h3v3M20 16v3h-3M7 19H4v-3"/><path d="M8 9h8M12 9v7"/></svg><span>OCR</span></button>
   <button id="bSettings" title="Settings: export / import / reset tool options"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>Settings</span></button>
@@ -134,6 +135,7 @@
     <button id="bZoom100" class="txt" title="Actual size (Ctrl+1)">1:1</button>
   </div>
 </footer>
+<div id="sim" hidden tabindex="-1"></div>
 <div id="palette" hidden></div>
 <div id="ctx" hidden></div>
 <div id="emojiPicker" hidden>
@@ -165,7 +167,9 @@
 <script src="../tauri-api.js"></script>
 <script src="../emoji/blob.js"></script>
 <script src="calc-core.js"></script>
+<script src="sim-core.js"></script>
 <script src="editor.js"></script>
 <script src="calc.js"></script>
+<script src="sim.js"></script>
 </body>
 </html>

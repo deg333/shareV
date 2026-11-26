@@ -1385,6 +1385,7 @@ function placeLines(lines) {
 }
 $('bOcr').onclick = () => { openSide(); runOcr(); };
 $('bCalc').onclick = toggleCalc;
+$('bSim').onclick = () => window.ShareVSim && window.ShareVSim.open();
 $('ocrAll').onclick = () => runOcr();
 $('ocrRegion').onclick = () => { if (state.loaded) setTool('ocr'); };
 $('sideClose').onclick = () => { openSide(false); showHl(null); };
@@ -1655,7 +1656,7 @@ loadHotkeys();
 // ------------------------------------------------------------------ keyboard shortcut help
 const SHORTCUTS = [
   ['Tools', [['Select / move', 'V'], ['Rectangle', 'R'], ['Ellipse', 'E'], ['Line', 'L'], ['Arrow', 'A'], ['Pen (bezier curves)', 'P'], ['Freehand (smoothed)', 'F'],
-    ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H'], ['Calculator / unit converter sidebar', 'F2'], ['Blur region', 'U'], ['Pixelate region', 'X'], ['Recognise text in region (OCR)', 'O'], ['Emoji stamp', 'M']]],
+    ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H'], ['Calculator / unit converter sidebar', 'F2'], ['Crank & slider simulator', 'F3'], ['Blur region', 'U'], ['Pixelate region', 'X'], ['Recognise text in region (OCR)', 'O'], ['Emoji stamp', 'M']]],
   ['Selecting', [['Select several', 'Drag a box, or Shift/Ctrl + click'], ['Select all', 'Ctrl + A'], ['Deselect / back to Select', 'Esc'], ['Edit text of selected', 'Enter / double-click']]],
   ['Style', [['Copy style of selected shape', 'Ctrl + Shift + C'], ['Paste style onto selection', 'Ctrl + Shift + V'], ['Style painter tool', 'K'], ['Context menu with these and more', 'right-click a shape']]],
   ['Editing the selection', [['Nudge 1 px', '← ↑ → ↓'], ['Nudge 10 px', 'Shift + arrow keys'], ['Duplicate', 'Ctrl + D'], ['Bring to front', 'Ctrl + ]'],
@@ -1806,7 +1807,7 @@ function toggleCalc() {
   if (!window.ShareVCalc) return;
   if (!$('calcSide').hidden) openPanel(null); else window.ShareVCalc.open();
 }
-addEventListener('keydown', (e) => { if (e.key === 'F2') { e.preventDefault(); toggleCalc(); } }, true);
+addEventListener('keydown', (e) => { if (e.key === 'F2' && $('sim').hidden) { e.preventDefault(); toggleCalc(); } }, true);
 addEventListener('keydown', (e) => {
   const tag = e.target.tagName;
   if (e.target.closest && e.target.closest('#calcSide')) return; // the calculator panel handles its own keys

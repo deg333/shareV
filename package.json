@@ -7,7 +7,7 @@
     "dev": "tauri dev",
     "build": "tauri build --no-bundle",
     "bundle": "tauri build",
-    "test": "node test/calc.test.js && node test/editor.test.js"
+    "test": "node test/calc.test.js && node test/sim.test.js && node test/editor.test.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
