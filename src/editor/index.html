@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>ShareV</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="bar">
+  <div class="grp" id="capGrp">
+    <button data-cap="full" title="Capture full screen (PrintScreen)">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 21h8M12 17v4"/></svg><span>Screen</span></button>
+    <button data-cap="window" title="Capture active window (Alt+PrintScreen)">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9h18"/></svg><span>Window</span></button>
+    <button data-cap="region" title="Capture region (Ctrl+PrintScreen)">
+      <svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" stroke-dasharray="0"/><rect x="9" y="9" width="6" height="6" stroke-dasharray="2 2"/></svg><span>Region</span></button>
+    <button data-cap="lastRegion" title="Capture last region (Ctrl+Shift+PrintScreen)">
+      <svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><path d="M12 9v3l2 1.5"/></svg><span>Last</span></button>
+  </div>
+  <div class="sep"></div>
+  <div class="grp">
+    <button id="bOpen" title="Open image or SVG (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+    <button id="bSave" title="Save as SVG (Ctrl+S)"><svg viewBox="0 0 24 24"><path d="M5 3h11l4 4v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg><span>SVG</span></button>
+    <button id="bSaveAs" title="Save SVG as… (Ctrl+Shift+S)"><svg viewBox="0 0 24 24"><path d="M5 3h11l4 4v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M12 11v6M9 14h6"/></svg></button>
+    <button id="bPng" title="Export PNG"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="M21 16l-5-5-8 8"/></svg><span>PNG</span></button>
+    <button id="bCopy" title="Copy image to clipboard (Ctrl+C)"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg></button>
+  </div>
+  <div class="sep"></div>
+  <div class="grp">
+    <button id="bUndo" title="Undo (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+    <button id="bRedo" title="Redo (Ctrl+Y)"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+    <button id="bDel" title="Delete selected (Del)"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+  </div>
+</header>
+
+<header id="tools">
+  <div class="grp" id="toolGrp">
+    <button data-tool="select" title="Select / move (V)"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-3 6z"/></svg></button>
+    <button data-tool="rect" title="Rectangle (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12"/></svg></button>
+    <button data-tool="ellipse" title="Ellipse (E)"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="6"/></svg></button>
+    <button data-tool="line" title="Line (L)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5"/></svg></button>
+    <button data-tool="arrow" title="Arrow (A)"><svg viewBox="0 0 24 24"><path d="M5 19L18 6M9 6h9v9"/></svg></button>
+    <button data-tool="pen" title="Freehand (P)"><svg viewBox="0 0 24 24"><path d="M3 17c3-8 5-8 6-3s3 4 5-1 4-5 7-1"/></svg></button>
+    <button data-tool="text" title="Text (T)"><svg viewBox="0 0 24 24"><path d="M6 6h12M12 6v13M9 19h6"/></svg></button>
+    <button data-tool="textbox" title="Text box (B)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1"/><path d="M7 10h10M7 14h6"/></svg></button>
+    <button data-tool="balloon" title="Balloon (C)"><svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-5 4v-4H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg></button>
+    <button data-tool="highlight" title="Highlight (H)"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="8" fill="currentColor" fill-opacity=".35"/><path d="M6 12h12"/></svg></button>
+  </div>
+  <div class="sep"></div>
+  <div class="grp props">
+    <label title="Line / border color">Line <input type="color" id="pStroke" value="#ff2d2d"></label>
+    <label title="Fill color (also highlight colour)">Fill <input type="color" id="pFill" value="#fff176"></label>
+    <label class="chk" title="Fill rectangles and ellipses"><input type="checkbox" id="pFillOn"> fill</label>
+    <label title="Text color">Text <input type="color" id="pText" value="#1a1a1a"></label>
+    <label title="Line width">Width <input type="number" id="pWidth" min="1" max="60" value="4"></label>
+    <label title="Font size">Font <input type="number" id="pSize" min="6" max="200" value="28"></label>
+    <label class="chk" title="Bold text"><input type="checkbox" id="pBold"> <b>B</b></label>
+  </div>
+  <div class="grow"></div>
+  <div class="grp">
+    <button id="bZoomOut" title="Zoom out (Ctrl+-)">−</button>
+    <button id="bZoomLbl" class="txt" title="Fit to window (Ctrl+0)">100%</button>
+    <button id="bZoomIn" title="Zoom in (Ctrl++)">+</button>
+    <button id="bZoom100" class="txt" title="Actual size (Ctrl+1)">1:1</button>
+  </div>
+</header>
+
+<main id="stage">
+  <div id="welcome">
+    <h1>ShareV</h1>
+    <p>Capture the screen or open an image / SVG to start annotating.</p>
+    <p class="keys"><kbd>PrintScreen</kbd> full screen &nbsp; <kbd>Alt+PrintScreen</kbd> window<br>
+      <kbd>Ctrl+PrintScreen</kbd> region &nbsp; <kbd>Ctrl+Shift+PrintScreen</kbd> last region</p>
+  </div>
+  <div id="wrap" hidden>
+    <svg id="svg" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+      <image id="bg" x="0" y="0"/>
+      <g id="ann"></g>
+      <g id="ui"></g>
+    </svg>
+    <textarea id="edit" spellcheck="false" hidden></textarea>
+  </div>
+</main>
+<footer id="status"><span id="stInfo"></span><span id="stPos"></span></footer>
+<script src="editor.js"></script>
+</body>
+</html>

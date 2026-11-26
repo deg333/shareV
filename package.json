@@ -1,0 +1,55 @@
+{
+  "name": "sharev",
+  "version": "0.1.0",
+  "description": "ShareV - portable screen capture with SVG vector annotations",
+  "main": "src/main.js",
+  "author": "ShareV",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win portable",
+    "dist:linux": "electron-builder --linux AppImage",
+    "dist:mac": "electron-builder --mac zip",
+    "test": "node test/editor.test.js"
+  },
+  "build": {
+    "appId": "dev.sharev.app",
+    "productName": "ShareV",
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "portable": {
+      "artifactName": "ShareV-${version}-portable.exe"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Graphics",
+      "icon": "assets/icon.png"
+    },
+    "mac": {
+      "target": [
+        "zip"
+      ],
+      "category": "public.app-category.graphics-design"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.5.0",
+    "electron-builder": "^26.18.0"
+  }
+}
