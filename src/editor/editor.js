@@ -1598,6 +1598,40 @@ capDelay.addEventListener('change', () => { saveCapOpts(); capDelay.blur(); });
 capSelf.addEventListener('change', () => { saveCapOpts(); capSelf.blur(); });
 if (window.api.onTick) window.api.onTick((n) => { if (n > 0) flash(`Capturing in ${n}…`); });
 
+// ------------------------------------------------------------------ capture hotkeys while ShareV has focus
+// The global keyboard hook normally swallows these keys. If it ever misses one (hook dropped, key delivered to this window)
+// the editor triggers the capture itself, so the hotkeys keep working with ShareV focused.
+let hotkeyMap = {};
+const modKey = (c, a, s) => `${c ? 'c' : ''}${a ? 'a' : ''}${s ? 's' : ''}`;
+function loadHotkeys() {
+  if (!window.api.getHotkeys) return;
+  window.api.getHotkeys().then((hk) => {
+    const map = {};
+    const modes = { fullscreen: 'full', region: 'region', window: 'window', lastRegion: 'lastRegion' };
+    for (const [name, mode] of Object.entries(modes)) {
+      const parts = String(hk[name] || '').split('+').map((x) => x.trim().toLowerCase());
+      if (!parts.some((x) => ['printscreen', 'prtsc', 'prtscr', 'snapshot'].includes(x))) continue; // other keys use the global-shortcut plugin
+      const has = (...n) => parts.some((x) => n.includes(x));
+      map[modKey(has('ctrl', 'control', 'commandorcontrol', 'cmdorctrl', 'commandorctrl', 'cmd', 'command'), has('alt', 'option'), has('shift'))] = mode;
+    }
+    hotkeyMap = map;
+  }).catch(() => {});
+}
+let lastHotkey = 0;
+function onPrintScreen(e) {
+  if (e.code !== 'PrintScreen' && e.key !== 'PrintScreen') return;
+  const mode = hotkeyMap[modKey(e.ctrlKey || e.metaKey, e.altKey, e.shiftKey)];
+  if (!mode) return;
+  e.preventDefault();
+  const now = Date.now();
+  if (now - lastHotkey < 700) return; // keydown and keyup both arrive for some combinations
+  lastHotkey = now;
+  window.api.capture(mode);
+}
+addEventListener('keydown', onPrintScreen, true);
+addEventListener('keyup', onPrintScreen, true); // Windows sends only a key-up for a plain PrintScreen
+loadHotkeys();
+
 // ------------------------------------------------------------------ keyboard shortcut help
 const SHORTCUTS = [
   ['Tools', [['Select / move', 'V'], ['Rectangle', 'R'], ['Ellipse', 'E'], ['Line', 'L'], ['Arrow', 'A'], ['Pen (bezier curves)', 'P'], ['Freehand (smoothed)', 'F'],

@@ -23,6 +23,8 @@ const SHOT = process.env.SHOT; // optional screenshot path
       openFile: async () => null, openFolder() {},
       ocr: async () => ({ language: 'English', lines: [{ text: 'Hello window', x: 90, y: 95, w: 210, h: 34 }, { text: 'second line', x: 90, y: 140, w: 150, h: 30 }] }), copyText: async (t) => { window.__copied = t; },
       emojiList: async () => [], emojiSave: async (n) => { window.__emojiSaved = n; return n.endsWith('.svg') ? n : n + '.svg'; }, emojiDelete: async () => {}, emojiImport: async () => [{ file: 'my star.svg', svg: '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><script>alert(1)</script><path onclick="x()" d="M32 4l8 24h24l-20 15 8 24-20-15-20 15 8-24L0 28h24z" fill="gold"/></svg>' }],
+      getHotkeys: async () => ({ fullscreen: 'CommandOrControl+PrintScreen', region: 'PrintScreen', window: 'Alt+PrintScreen', lastRegion: 'CommandOrControl+Shift+PrintScreen' }),
+      capture: (m) => { (window.__caps = window.__caps || []).push(m); },
       getCaptureOpts: async () => ({ delay: 0, self: false }), setCaptureOpts: async (d, s) => { window.__cap = [d, s]; },
       loadUi: async () => null, saveUi: async (j) => { window.__ui = j; }, exportUi: async (j) => { window.__export = j; return 'x.json'; }, importUi: async () => window.__import || null,
     };
@@ -340,6 +342,15 @@ const SHOT = process.env.SHOT; // optional screenshot path
   assert.strictEqual(await page.locator('#emojiGrid .em').first().getAttribute('data-id'), fv[2], 'imported favourite pinned');
   await page.keyboard.press('Escape');
   await page.mouse.click(5, 400);
+
+  // hotkeys also work from inside the editor (fallback when the global hook misses a key)
+  await page.waitForTimeout(100);
+  await page.keyboard.press('PrintScreen');
+  await page.waitForTimeout(800);
+  await page.keyboard.press('Control+PrintScreen');
+  await page.waitForTimeout(800);
+  await page.keyboard.press('Alt+PrintScreen');
+  assert.deepStrictEqual(await page.evaluate(() => window.__caps), ['region', 'full', 'window'], 'editor-side hotkey fallback');
 
   // capture options: delay and include ShareV itself
   await page.selectOption('#capDelay', '3');

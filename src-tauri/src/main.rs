@@ -313,8 +313,19 @@ async fn region(app: &AppHandle, point: Option<(i32, i32)>) -> Result<Option<Rgb
 
 async fn do_capture(app: AppHandle, mode: String) {
     if shared(&app).busy.swap(true, Ordering::SeqCst) {
+        log(&shared(&app), &format!("capture '{mode}' ignored: another capture is still running"));
         return;
     }
+    // released on every exit path, even a panic, so one failure can never leave the hotkeys dead
+    struct Busy<'a>(&'a AtomicBool);
+    impl Drop for Busy<'_> {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::SeqCst);
+        }
+    }
+    let sh_state = shared(&app);
+    let _busy = Busy(&sh_state.busy);
+    let started = std::time::Instant::now();
     let (delay, keep_self) = {
         let s = shared(&app).settings.lock().unwrap().clone();
         (s.capture_delay.min(5), s.capture_self)
@@ -337,6 +348,7 @@ async fn do_capture(app: AppHandle, mode: String) {
     }
     let _ = app.emit("capture-tick", 0);
     let result = capture_inner(&app, &mode).await;
+    log(&shared(&app), &format!("capture '{mode}' taken after {} ms (hidden windows: {}, delay: {delay}s)", started.elapsed().as_millis(), hidden.len()));
     for w in &hidden {
         let _ = w.show();
     }
@@ -726,6 +738,11 @@ struct CaptureOpts {
 }
 
 #[tauri::command]
+async fn get_hotkeys(app: AppHandle) -> Hotkeys {
+    shared(&app).settings.lock().unwrap().hotkeys.clone()
+}
+
+#[tauri::command]
 async fn get_capture_opts(app: AppHandle) -> CaptureOpts {
     let s = shared(&app).settings.lock().unwrap().clone();
     CaptureOpts { delay: s.capture_delay.min(5), self_: s.capture_self }
@@ -893,8 +910,8 @@ mod winhook {
         VK_CONTROL, VK_MENU, VK_SHIFT, VK_SNAPSHOT,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage, KBDLLHOOKSTRUCT, MSG,
-        WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN,
+        CallNextHookEx, DispatchMessageW, GetMessageW, SetTimer, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
+        KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN, WM_TIMER,
     };
 
     pub struct Binding {
@@ -963,14 +980,30 @@ mod winhook {
         let _ = BINDINGS.set(bindings);
         std::thread::spawn(|| unsafe {
             let hmod = GetModuleHandleW(None).ok().map(|h| HINSTANCE(h.0));
-            if let Err(e) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(proc), hmod, 0) {
+            let say = |m: &str| {
                 if let Some(app) = APP.get() {
-                    super::log(&super::shared(app), &format!("keyboard hook failed: {e}"));
+                    super::log(&super::shared(app), m);
                 }
-                return;
-            }
+            };
+            let mut hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(proc), hmod, 0) {
+                Ok(h) => h,
+                Err(e) => {
+                    say(&format!("keyboard hook failed: {e}"));
+                    return;
+                }
+            };
+            say("keyboard hook installed");
+            // Windows silently drops a low-level hook whose callback was ever too slow: put it back every 20 s
+            SetTimer(None, 1, 20_000, None);
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                if msg.message == WM_TIMER {
+                    let _ = UnhookWindowsHookEx(hook);
+                    if let Ok(h) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(proc), hmod, 0) {
+                        hook = h;
+                    }
+                    continue;
+                }
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
@@ -1041,7 +1074,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             capture, editor_init, editor_state, editor_title, save_svg, export_png, copy_png, open_file,
-            open_folder, overlay_init, overlay_ready, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text, get_capture_opts, set_capture_opts, emoji_list, emoji_save, emoji_delete, emoji_import
+            open_folder, overlay_init, overlay_ready, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text, get_hotkeys, get_capture_opts, set_capture_opts, emoji_list, emoji_save, emoji_delete, emoji_import
         ])
         .setup(|app| {
             let data_dir = resolve_data_dir(app);

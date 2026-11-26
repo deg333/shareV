@@ -22,6 +22,7 @@
     emojiSave: (name, svg) => invoke('emoji_save', { name, svg }),
     emojiDelete: (file) => invoke('emoji_delete', { file }),
     emojiImport: () => invoke('emoji_import'),
+    getHotkeys: () => invoke('get_hotkeys'),
     getCaptureOpts: () => invoke('get_capture_opts'),
     setCaptureOpts: (delay, includeSelf) => invoke('set_capture_opts', { delay, includeSelf }),
     onTick: (cb) => listen('capture-tick', (e) => cb(e.payload)),

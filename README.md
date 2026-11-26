@@ -101,3 +101,7 @@ change them.
 **Hotkey speed**: the region picker window and a blank editor window are kept loaded (hidden) in the background, ShareV
 only waits for its windows to hide when one was actually visible, and the region picker gets a screenshot shrunk to its
 displayed size. The first capture after starting ShareV can still be slightly slower while those warm up.
+
+**Hotkeys while ShareV has focus**: besides the global keyboard hook, the editor itself also triggers the capture if it
+receives a PrintScreen combination. `ShareV-Data/log.txt` records the hook installing, each capture and how long it took
+(and if a capture was ignored because another was still running) - send it along if a hotkey ever misbehaves.
