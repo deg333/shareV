@@ -8,14 +8,16 @@ const svg = $('svg'), ann = $('ann'), ui = $('ui'), bgImg = $('bg'), wrap = $('w
 const ta = $('edit');
 const FONT = "'Segoe UI', Helvetica, Arial, sans-serif";
 const PAD = 8;
-const BOX = new Set(['rect', 'ellipse', 'textbox', 'balloon', 'highlight']);
+const BOX = new Set(['rect', 'ellipse', 'textbox', 'balloon', 'highlight', 'blur', 'pixelate']);
+const FX = new Set(['blur', 'pixelate']); // effects applied to the screenshot itself, drawn under the annotations
+const SHADOWY = new Set(['rect', 'ellipse', 'line', 'arrow', 'pen', 'bezier', 'text', 'textbox', 'balloon', 'step']);
 const TEXTY = new Set(['text', 'textbox', 'balloon']);
 
 const state = {
   w: 0, h: 0, bg: '', shapes: [], sels: [], marquee: null, tool: 'select', zoom: 1,
   get sel() { return this.sels.length ? this.sels[this.sels.length - 1] : null; }, // primary selection
   set sel(v) { this.sels = v == null ? [] : [v]; },
-  undo: [], redo: [], nextId: 1, name: '', loaded: false, bz: null, bzHover: null, bzPre: '', stepOverride: null,
+  undo: [], redo: [], nextId: 1, name: '', loaded: false, bz: null, bzHover: null, bzPre: '', stepOverride: null, bgCanvas: null, bakeFx: true,
 };
 window.__state = state; // handy for tests / debugging
 
@@ -283,6 +285,8 @@ function shapeInner(s, hit) {
       return `<circle cx="${num(s.x)}" cy="${num(s.y)}" r="${num(r)}" fill="${s.fill}"${opAttr('fill-opacity', s.fa)}${ring}/>` +
         `<text x="${num(s.x)}" y="${num(s.y)}" dy="0.35em" text-anchor="middle" font-family="${esc(FONT)}" font-size="${num(fs)}" font-weight="bold" fill="${s.tc}"${opAttr('fill-opacity', s.ta)}>${esc(label)}</text>`;
     }
+    case 'blur': case 'pixelate':
+      return fxInner(s);
     case 'highlight': {
       const r = `x="${num(s.x)}" y="${num(s.y)}" width="${num(s.w)}" height="${num(s.h)}"`;
       return `<rect ${r} fill="${s.fill}" fill-opacity="${num(s.fa ?? 0.5)}" style="mix-blend-mode:multiply"/>` +
@@ -292,21 +296,108 @@ function shapeInner(s, hit) {
       return '';
   }
 }
-const shapeSvg = (s, hit) => `<g id="shape-${s.id}" data-type="${s.type}"${hit ? ` data-id="${s.id}"` : ''}>${shapeInner(s, hit)}</g>`;
+// ---- blur / pixelate: computed on a canvas from the screenshot, embedded as a small raster <image>
+const fxCache = new Map();
+function fxCanvas(s) {
+  const bg = state.bgCanvas;
+  if (!bg) return null;
+  const x = Math.round(s.x), y = Math.round(s.y), w = Math.max(1, Math.round(s.w)), h = Math.max(1, Math.round(s.h));
+  const amt = Math.max(1, Math.round(s.amt || 12));
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const g = out.getContext('2d');
+  if (s.type === 'pixelate') {
+    const bw = Math.max(1, Math.ceil(w / amt)), bh = Math.max(1, Math.ceil(h / amt));
+    const small = document.createElement('canvas');
+    small.width = bw; small.height = bh;
+    const sg = small.getContext('2d');
+    sg.imageSmoothingEnabled = true; sg.imageSmoothingQuality = 'high';
+    sg.drawImage(bg, x, y, w, h, 0, 0, bw, bh); // average each block...
+    g.imageSmoothingEnabled = false;
+    g.drawImage(small, 0, 0, bw, bh, 0, 0, bw * amt, bh * amt); // ...then blow it up without smoothing
+  } else {
+    const pad = Math.ceil(amt * 2.5); // sample beyond the box so the edges blur with their surroundings
+    const t = document.createElement('canvas');
+    t.width = w + 2 * pad; t.height = h + 2 * pad;
+    const tg = t.getContext('2d');
+    tg.filter = `blur(${amt}px)`;
+    tg.drawImage(bg, x - pad, y - pad, w + 2 * pad, h + 2 * pad, 0, 0, w + 2 * pad, h + 2 * pad);
+    g.drawImage(t, pad, pad, w, h, 0, 0, w, h);
+  }
+  return out;
+}
+function fxUrl(s) {
+  const key = [s.type, Math.round(s.x), Math.round(s.y), Math.round(s.w), Math.round(s.h), s.amt].join('|');
+  let url = fxCache.get(key);
+  if (!url) {
+    const c = fxCanvas(s);
+    if (!c) return '';
+    url = c.toDataURL('image/png');
+    if (fxCache.size > 80) fxCache.clear();
+    fxCache.set(key, url);
+  }
+  return url;
+}
+function fxInner(s) {
+  const url = fxUrl(s);
+  const r = `x="${Math.round(s.x)}" y="${Math.round(s.y)}" width="${Math.max(1, Math.round(s.w))}" height="${Math.max(1, Math.round(s.h))}"`;
+  return url ? `<image ${r} preserveAspectRatio="none" xlink:href="${url}"/>` : `<rect ${r} fill="#888" fill-opacity=".3"/>`;
+}
+/** Screenshot with every blur/pixelate burned in (used when saving, so the original pixels are not left in the file). */
+function bakedBgUrl() {
+  const bg = state.bgCanvas;
+  const c = document.createElement('canvas');
+  c.width = bg.width; c.height = bg.height;
+  const g = c.getContext('2d');
+  g.drawImage(bg, 0, 0);
+  for (const s of state.shapes) if (FX.has(s.type)) { const f = fxCanvas(s); if (f) g.drawImage(f, Math.round(s.x), Math.round(s.y)); }
+  return c.toDataURL('image/png');
+}
+function buildBgCanvas(src) {
+  const im = new Image();
+  im.onload = () => {
+    if (state.bg !== src) return;
+    const c = document.createElement('canvas');
+    c.width = im.naturalWidth; c.height = im.naturalHeight;
+    c.getContext('2d').drawImage(im, 0, 0);
+    state.bgCanvas = c; fxCache.clear();
+    render();
+  };
+  im.src = src;
+}
+// ---- drop shadow: one filter per distinct size, defined once per document
+const shadowId = (z) => `sv-sh-${Math.round(z)}`;
+function shadowDefs() {
+  const sizes = [...new Set(state.shapes.filter((s) => s.sh && SHADOWY.has(s.type)).map((s) => Math.round(s.shz || 4)))];
+  return sizes.map((z) => `<filter id="${shadowId(z)}" filterUnits="userSpaceOnUse" x="0" y="0" width="${state.w}" height="${state.h}" color-interpolation-filters="sRGB">` +
+    `<feGaussianBlur in="SourceAlpha" stdDeviation="${num(z * 0.6)}"/><feOffset dx="${num(z * 0.7)}" dy="${num(z * 0.9)}" result="o"/>` +
+    `<feComponentTransfer in="o" result="s"><feFuncA type="linear" slope="0.6"/></feComponentTransfer>` +
+    `<feMerge><feMergeNode in="s"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`).join('');
+}
+const shapeSvg = (s, hit) => `<g id="shape-${s.id}" data-type="${s.type}"${hit ? ` data-id="${s.id}"` : ''}${s.sh && SHADOWY.has(s.type) ? ` filter="url(#${shadowId(s.shz || 4)})"` : ''}>${shapeInner(s, hit)}</g>`;
 
 function buildSvg() {
   const { w, h } = state;
-  const meta = JSON.stringify({ version: 1, w, h, shapes: JSON.parse(snapshot()) });
+  const fxShapes = state.shapes.filter((s) => FX.has(s.type));
+  const bake = state.bakeFx && fxShapes.length && state.bgCanvas;
+  const all = JSON.parse(snapshot());
+  const kept = bake ? all.filter((s) => !FX.has(s.type)) : all;
+  const meta = JSON.stringify({ version: 1, w, h, shapes: kept });
+  const others = state.shapes.filter((s) => !FX.has(s.type));
   return `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">\n` +
     `<metadata id="sharev-data">${esc(meta)}</metadata>\n` +
-    `<image id="sharev-bg" x="0" y="0" width="${w}" height="${h}" xlink:href="${state.bg}"/>\n` +
-    `<g id="annotations">\n${state.shapes.map((s) => shapeSvg(s, false)).join('\n')}\n</g>\n</svg>\n`;
+    `<defs>${shadowDefs()}</defs>\n` +
+    `<image id="sharev-bg" x="0" y="0" width="${w}" height="${h}" xlink:href="${bake ? bakedBgUrl() : state.bg}"/>\n` +
+    (bake ? '' : `<g id="effects">\n${fxShapes.map((s) => shapeSvg(s, false)).join('\n')}\n</g>\n`) +
+    `<g id="annotations">\n${others.map((s) => shapeSvg(s, false)).join('\n')}\n</g>\n</svg>\n`;
 }
 
 // ------------------------------------------------------------------ rendering
 function render() {
-  ann.innerHTML = state.shapes.map((s) => shapeSvg(s, true)).join('');
+  $('defs').innerHTML = shadowDefs();
+  $('fx').innerHTML = state.shapes.filter((s) => FX.has(s.type)).map((s) => shapeSvg(s, true)).join('');
+  ann.innerHTML = state.shapes.filter((s) => !FX.has(s.type)).map((s) => shapeSvg(s, true)).join('');
   renderUI();
   updateButtons();
 }
@@ -393,6 +484,7 @@ function loadDoc({ bg, w, h, shapes }, name) {
   svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
   bgImg.setAttribute('width', w); bgImg.setAttribute('height', h);
   bgImg.setAttribute('href', bg);
+  state.bgCanvas = null; buildBgCanvas(bg);
   $('welcome').hidden = true; wrap.hidden = false;
   fit(); render();
   $('stInfo').textContent = `${w} × ${h}px`;
@@ -461,6 +553,7 @@ function updateButtons() {
 // ------------------------------------------------------------------ per-tool options
 const RED = '#ff0000', WHITE = '#ffffff', YELLOW = '#ffff00';
 const ALPHA = { sa: 1, fa: 1, ta: 1 };
+const SHADOW_DEFAULT = { sh: false, shz: 4 };
 const LINE_OPTS = { stroke: RED, sw: 4, hs: false, he: false, hz: 20 };
 const BOX_OPTS = { fill: RED, fillOn: true, stroke: WHITE, sw: 3, tc: WHITE, size: 24, bold: false };
 const DEFAULT_OPTS = {
@@ -474,6 +567,8 @@ const DEFAULT_OPTS = {
   textbox: { ...BOX_OPTS },
   balloon: { ...BOX_OPTS },
   highlight: { fill: YELLOW, fa: 0.5, stroke: RED, sw: 0 },
+  blur: { amt: 12 },
+  pixelate: { amt: 12 },
   step: { fill: RED, tc: WHITE, size: 36, stroke: WHITE, sw: 0 }, // numbered red circle
 };
 const OPTS_KEY = 'sharev.toolopts.v1';
@@ -481,7 +576,7 @@ const toolOpts = (() => {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(OPTS_KEY) || '{}') || {}; } catch { /* storage unavailable */ }
   const o = {};
-  for (const k of Object.keys(DEFAULT_OPTS)) o[k] = { ...ALPHA, ...DEFAULT_OPTS[k], ...(saved[k] || {}) };
+  for (const k of Object.keys(DEFAULT_OPTS)) o[k] = { ...ALPHA, ...(SHADOWY.has(k) ? SHADOW_DEFAULT : {}), ...DEFAULT_OPTS[k], ...(saved[k] || {}) };
   return o;
 })();
 let saveTimer = 0;
@@ -491,14 +586,16 @@ function persistOpts() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { if (window.api.saveUi) window.api.saveUi(settingsJson()).catch(() => {}); }, 400);
 }
-const settingsJson = () => JSON.stringify({ app: 'ShareV', version: 1, toolOpts, customColors }, null, 2);
+const settingsJson = () => JSON.stringify({ app: 'ShareV', version: 1, toolOpts, customColors, bakeFx: state.bakeFx }, null, 2);
 function applySettings(obj) {
   const src = (obj && obj.toolOpts) || {};
   for (const k of Object.keys(DEFAULT_OPTS)) {
     const clean = {};
-    for (const [key, val] of Object.entries(src[k] || {})) if (key in DEFAULT_OPTS[k] || key in ALPHA) clean[key] = val;
-    toolOpts[k] = { ...ALPHA, ...DEFAULT_OPTS[k], ...clean };
+    for (const [key, val] of Object.entries(src[k] || {})) if (key in DEFAULT_OPTS[k] || key in ALPHA || key in SHADOW_DEFAULT) clean[key] = val;
+    toolOpts[k] = { ...ALPHA, ...(SHADOWY.has(k) ? SHADOW_DEFAULT : {}), ...DEFAULT_OPTS[k], ...clean };
   }
+  state.bakeFx = !(obj && obj.bakeFx === false);
+  if (typeof refreshBakeLabel === 'function') refreshBakeLabel();
   customColors = Array.isArray(obj && obj.customColors) ? obj.customColors.filter((c) => /^#[0-9a-f]{6}$/i.test(c)).slice(0, 16) : [];
   const type = ctxType();
   if (type && state.tool !== 'select') loadOpts(type);
@@ -510,10 +607,12 @@ const P = {
   width: $('pWidth'), size: $('pSize'), bold: $('pBold'),
   strokeA: $('pStrokeA'), fillA: $('pFillA'), textA: $('pTextA'),
   headStart: $('pHeadStart'), headEnd: $('pHeadEnd'), headSize: $('pHeadSize'), num: $('pNum'),
+  amount: $('pAmount'), shadow: $('pShadow'), shadowSize: $('pShadowSize'),
 };
 const KEYMAP = {
   stroke: 'stroke', fill: 'fill', fillOn: 'fillOn', text: 'tc', width: 'sw', size: 'size', bold: 'bold',
   strokeA: 'sa', fillA: 'fa', textA: 'ta', headStart: 'hs', headEnd: 'he', headSize: 'hz',
+  amount: 'amt', shadow: 'sh', shadowSize: 'shz',
 };
 const LINEY = ['stroke', 'width', 'headStart', 'headEnd', 'headSize'];
 const BOXY = ['stroke', 'fill', 'fillOn', 'text', 'width', 'size', 'bold'];
@@ -522,7 +621,10 @@ const RELEVANT = {
   line: LINEY, arrow: LINEY, pen: LINEY, bezier: [...LINEY, 'fill', 'fillOn'],
   text: ['text', 'stroke', 'width', 'size', 'bold'], textbox: BOXY, balloon: BOXY, highlight: ['stroke', 'fill', 'width'],
   step: ['fill', 'text', 'stroke', 'width', 'size', 'num'],
+  blur: ['amount'], pixelate: ['amount'],
 };
+for (const k of Object.keys(RELEVANT)) if (SHADOWY.has(k)) RELEVANT[k] = [...RELEVANT[k], 'shadow', 'shadowSize'];
+const AMOUNT_LABEL = { blur: 'Radius', pixelate: 'Block' };
 const STROKE_LABEL = { text: 'Outline', textbox: 'Border', balloon: 'Border', step: 'Border' };
 const SIZE_LABEL = { step: 'Size' };
 const maxStep = () => state.shapes.reduce((m, s) => (s.type === 'step' ? Math.max(m, s.n) : m), 0);
@@ -549,6 +651,8 @@ function updateControls() {
   }
   const first = P.stroke.closest('label').firstChild;
   if (first && first.nodeType === 3) first.nodeValue = (STROKE_LABEL[type] || 'Line') + ' ';
+  const am = P.amount.closest('label').querySelector('.lbl');
+  if (am) am.textContent = AMOUNT_LABEL[type] || 'Radius';
   const sz = P.size.closest('label').firstChild;
   if (sz && sz.nodeType === 3) sz.nodeValue = (SIZE_LABEL[type] || 'Font') + ' ';
 }
@@ -565,6 +669,8 @@ function loadOpts(type) {
   P.strokeA.value = Math.round((o.sa ?? 1) * 100);
   P.fillA.value = Math.round((o.fa ?? 1) * 100);
   P.textA.value = Math.round((o.ta ?? 1) * 100);
+  if ('amt' in o) P.amount.value = o.amt;
+  if ('sh' in o) { P.shadow.checked = o.sh; P.shadowSize.value = o.shz; }
   if ('hs' in o) { P.headStart.checked = o.hs; P.headEnd.checked = o.he; P.headSize.value = o.hz; }
 }
 function syncProps() {
@@ -581,6 +687,8 @@ function syncProps() {
     P.fillA.value = Math.round((s.fa ?? (s.type === 'highlight' ? 0.5 : 1)) * 100);
     P.textA.value = Math.round((s.ta ?? 1) * 100);
     if (s.type === 'step') P.num.value = s.n;
+    if ('amt' in s) P.amount.value = s.amt;
+    if (SHADOWY.has(s.type)) { P.shadow.checked = !!s.sh; P.shadowSize.value = s.shz || 4; }
     if (HEADY.has(s.type)) { P.headStart.checked = headOn(s, false); P.headEnd.checked = headOn(s, true); P.headSize.value = Math.round(headLen(s)); }
   }
   updateControls();
@@ -592,7 +700,7 @@ function onProp(key) {
     const v = el.type === 'checkbox' ? el.checked : el.value;
     if (key === 'num' && state.tool === 'step') { state.stepOverride = Math.max(0, Math.round(+el.value || 0)); return; }
     const isAlpha = /A$/.test(key) && key !== 'fillOn';
-    const store = isAlpha ? clamp((+v || 0) / 100, 0, 1) : ['width', 'size', 'headSize'].includes(key) ? +v || 0 : v;
+    const store = isAlpha ? clamp((+v || 0) / 100, 0, 1) : ['width', 'size', 'headSize', 'amount', 'shadowSize'].includes(key) ? +v || 0 : v;
     if (isAlpha) el.title = el.title.replace(/ \d+%$/, '') + ` ${Math.round(store * 100)}%`;
     // remember the value for the tool (or the selected shape's tool) it belongs to
     const ctx = ctxType();
@@ -616,6 +724,9 @@ function applyProp(s, key, v, store) {
       case 'text': if (TEXTY.has(s.type)) s.tc = v; break;
       case 'width': if ('sw' in s) s.sw = clamp(+v || 0, ['text', 'highlight', 'step'].includes(s.type) ? 0 : 1, 60); break;
       case 'size': if ('size' in s) s.size = clamp(+v || 12, 6, 400); break;
+      case 'amount': if (FX.has(s.type)) s.amt = clamp(Math.round(+v || 1), 1, 200); break;
+      case 'shadow': if (SHADOWY.has(s.type)) s.sh = v; break;
+      case 'shadowSize': if (SHADOWY.has(s.type)) s.shz = clamp(Math.round(+v || 4), 1, 40); break;
       case 'num': if (s.type === 'step' && state.sels.length === 1) s.n = Math.max(0, Math.round(+v || 0)); break;
       case 'bold': if ('bold' in s) s.bold = v; break;
       case 'strokeA': s.sa = store; break;
@@ -663,6 +774,12 @@ function finishBezier() {
 }
 
 function newShape(tool, p) {
+  const s = newShape0(tool, p);
+  const o = toolOpts[tool];
+  if (SHADOWY.has(tool)) { s.sh = !!o.sh; s.shz = o.shz; }
+  return s;
+}
+function newShape0(tool, p) {
   const o = toolOpts[tool];
   const alpha = { sa: o.sa, fa: o.fa, ta: o.ta };
   const base = { id: state.nextId++, type: tool, ...alpha };
@@ -686,6 +803,8 @@ function newShape(tool, p) {
       return { ...base, x: p.x, y: p.y, w: 0, h: 0, tx: p.x, ty: p.y, stroke: o.stroke, sw: o.sw, fill: filled, ...txt };
     case 'highlight':
       return { ...base, x: p.x, y: p.y, w: 0, h: 0, fill: o.fill, stroke: o.stroke, sw: o.sw };
+    case 'blur': case 'pixelate':
+      return { ...base, x: p.x, y: p.y, w: 0, h: 0, amt: o.amt };
     case 'step': {
       const n = nextStep();
       state.stepOverride = null;
@@ -803,7 +922,7 @@ svg.addEventListener('pointermove', (e) => {
     switch (s.type) {
       case 'step': s.x = p.x; s.y = p.y; break;
       case 'rect': case 'ellipse': setBox(s, drag.start, p, e.shiftKey); break;
-      case 'highlight': case 'textbox': case 'balloon': setBox(s, drag.start, p, false); break;
+      case 'highlight': case 'textbox': case 'balloon': case 'blur': case 'pixelate': setBox(s, drag.start, p, false); break;
       case 'line': case 'arrow': { const q = e.shiftKey ? snap45(drag.start, p) : p; s.x2 = q.x; s.y2 = q.y; break; }
       case 'pen': {
         const l = s.pts[s.pts.length - 1];
@@ -939,7 +1058,7 @@ ta.addEventListener('input', () => {
   const s = editing && editing.s;
   if (!s) return;
   s.text = ta.value;
-  ann.innerHTML = state.shapes.map((x) => shapeSvg(x, true)).join('');
+  ann.innerHTML = state.shapes.filter((x) => !FX.has(x.type)).map((x) => shapeSvg(x, true)).join('');
   renderUI();
   positionEditor(s);
 });
@@ -1086,7 +1205,7 @@ document.addEventListener('mousedown', (e) => { if (!palette.hidden && !palette.
 // ------------------------------------------------------------------ keyboard shortcut help
 const SHORTCUTS = [
   ['Tools', [['Select / move', 'V'], ['Rectangle', 'R'], ['Ellipse', 'E'], ['Line', 'L'], ['Arrow', 'A'], ['Pen (bezier curves)', 'P'], ['Freehand (smoothed)', 'F'],
-    ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H']]],
+    ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H'], ['Blur region', 'U'], ['Pixelate region', 'X']]],
   ['Selecting', [['Select several', 'Drag a box, or Shift/Ctrl + click'], ['Select all', 'Ctrl + A'], ['Deselect / back to Select', 'Esc'], ['Edit text of selected', 'Enter / double-click']]],
   ['Editing the selection', [['Nudge 1 px', '← ↑ → ↓'], ['Nudge 10 px', 'Shift + arrow keys'], ['Duplicate', 'Ctrl + D'], ['Bring to front', 'Ctrl + ]'],
     ['Send to back', 'Ctrl + ['], ['Delete', 'Del / Backspace'], ['Undo', 'Ctrl + Z'], ['Redo', 'Ctrl + Y / Ctrl + Shift + Z']]],
@@ -1101,7 +1220,9 @@ $('helpBody').innerHTML = SHORTCUTS.map(([title, rows]) => `<h3>${title}</h3>` +
 const help = $('help');
 // ---- settings menu
 const menu = $('menu');
-$('bSettings').onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
+function refreshBakeLabel() { $('bakeBtn').textContent = (state.bakeFx ? '\u2713 ' : '\u2003') + 'Burn blur / pixelate into saved image'; }
+refreshBakeLabel();
+$('bSettings').onclick = (e) => { e.stopPropagation(); refreshBakeLabel(); menu.hidden = !menu.hidden; };
 document.addEventListener('mousedown', (e) => { if (!menu.hidden && !menu.contains(e.target) && !e.target.closest('#bSettings')) menu.hidden = true; });
 menu.addEventListener('click', (e) => guard(async () => {
   const act = e.target.closest('button') && e.target.closest('button').dataset.act;
@@ -1111,6 +1232,9 @@ menu.addEventListener('click', (e) => guard(async () => {
   else if (act === 'import') {
     const txt = await window.api.importUi();
     if (txt) { const obj = JSON.parse(txt); if (!obj || typeof obj !== 'object' || !obj.toolOpts) throw new Error('Not a ShareV settings file'); applySettings(obj); persistOpts(); flash('Settings imported'); }
+  } else if (act === 'bake') {
+    state.bakeFx = !state.bakeFx; refreshBakeLabel(); persistOpts();
+    flash(state.bakeFx ? 'Blur/pixelate will be burned into saved files (original pixels removed)' : 'Blur/pixelate kept editable - the original unblurred screenshot stays inside the SVG!');
   } else if (act === 'reset') { applySettings({}); persistOpts(); flash('Tool options reset to defaults'); }
 }));
 const toggleHelp = (on) => { help.hidden = on === undefined ? !help.hidden : !on; };
@@ -1140,7 +1264,7 @@ stage.addEventListener('wheel', (e) => {
 }, { passive: false });
 addEventListener('resize', () => { if (state.loaded && state.zoom <= 1) fit(); });
 
-const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight', n: 'step' };
+const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight', n: 'step', u: 'blur', x: 'pixelate' };
 addEventListener('keydown', (e) => {
   const tag = e.target.tagName;
   if (tag === 'TEXTAREA' || (tag === 'INPUT' && ['number', 'text'].includes(e.target.type))) return; // typing; sliders/checkboxes keep shortcuts

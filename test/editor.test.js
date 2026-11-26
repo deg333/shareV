@@ -218,6 +218,32 @@ const SHOT = process.env.SHOT; // optional screenshot path
   const png = await page.evaluate(() => window.__sharev.renderPng());
   assert.ok(png.startsWith('data:image/png') && png.length > 5000, 'png rendered');
 
+  // blur + pixelate (burned into the saved image by default) and drop shadow
+  svgBox = await page.locator('#svg').boundingBox();
+  const origBg = await page.evaluate(() => window.__state.bg);
+  await page.keyboard.press('u');
+  assert.strictEqual(await page.locator('#opts label:visible', { hasText: 'Radius' }).count(), 1, 'blur shows a radius option');
+  await drag('u', [80, 90], [300, 140]);
+  await page.keyboard.press('x');
+  assert.strictEqual(await page.locator('#opts label:visible', { hasText: 'Block' }).count(), 1, 'pixelate shows a block option');
+  await drag('x', [320, 90], [420, 200]);
+  assert.deepStrictEqual(await page.evaluate(() => window.__state.shapes.slice(-2).map((s) => s.type)), ['blur', 'pixelate']);
+  assert.ok((await page.evaluate(() => document.querySelectorAll('#fx image').length)) === 2, 'effects render in the fx layer');
+  await page.keyboard.press('r');
+  await page.check('#pShadow');
+  await drag('r', [100, 300], [200, 350]);
+  assert.ok(await page.evaluate(() => window.__state.shapes.at(-1).sh === true), 'shape has shadow');
+  let out = await page.evaluate(() => window.__sharev.buildSvg());
+  assert.ok(out.includes('<filter id="sv-sh-4"') && out.includes('filter="url(#sv-sh-4)"'), 'shadow filter emitted');
+  assert.ok(!out.includes('id="effects"'), 'baked: no live effect layers in the saved svg');
+  const bakedHref = out.match(/id="sharev-bg"[^>]*xlink:href="([^"]+)"/)[1];
+  assert.notStrictEqual(bakedHref, origBg, 'saved screenshot has the blur/pixelate burned in');
+  assert.ok(!/&quot;type&quot;:&quot;(blur|pixelate)&quot;/.test(out), 'fx shapes not in metadata when baked');
+  await page.evaluate(() => { window.__state.bakeFx = false; });
+  out = await page.evaluate(() => window.__sharev.buildSvg());
+  assert.ok(out.includes('id="effects"') && /&quot;type&quot;:&quot;blur&quot;/.test(out), 'unbaked keeps editable effects');
+  await page.evaluate(() => { window.__state.bakeFx = true; });
+
   if (SHOT) { await page.keyboard.press('Escape'); await page.screenshot({ path: SHOT }); }
   assert.deepStrictEqual(errors, [], 'no page errors');
   await browser.close();

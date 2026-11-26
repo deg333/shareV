@@ -35,7 +35,8 @@ input.alpha { width: 56px; accent-color: var(--accent); }
 #status { align-items: center; gap: 10px; padding: 0 10px; } #status .grp button { height: 24px; min-width: 24px; }
 #stPos { min-width: 70px; text-align: right; }
 
-button.pal { height: 24px; min-width: 18px; padding: 0 3px; font-size: 11px; color: var(--dim); }
+button.pal { height: 26px; min-width: 28px; padding: 0 4px; font-size: 18px; line-height: 1; color: var(--fg); border-color: var(--line); }
+button.pal:hover { border-color: var(--accent); }
 #palette { position: fixed; z-index: 50; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px;
   box-shadow: 0 8px 28px rgba(0,0,0,.55); width: 268px; }
 #palette h4 { margin: 8px 0 5px; font-size: 11px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
@@ -60,3 +61,4 @@ button.pal { height: 24px; min-width: 18px; padding: 0 3px; font-size: 11px; col
 #menu button { justify-content: flex-start; height: 30px; }
 #menu .note { color: var(--dim); font-size: 11.5px; padding: 6px 8px 4px; border-top: 1px solid var(--line); margin-top: 4px; }
 #menu code { background: #3a3d44; padding: 0 4px; border-radius: 3px; }
+#opts { min-height: 42px; } #opts .props { flex-wrap: wrap; row-gap: 4px; }

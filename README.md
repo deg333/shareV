@@ -70,3 +70,8 @@ drag, arrow-key nudge, `Ctrl+D`, `Ctrl+]`/`[` and `Del` work on the whole select
 **Saved settings**: each tool's colours and options, plus your saved colours, are saved automatically to
 `ShareV-Data/ui-settings.json` (portable: copy the folder to carry them along). The Settings menu can export them
 to a file, import them on another machine, or reset to the defaults.
+
+**Blur (`U`) and pixelate (`X`)**: drag a region; radius / block size are options. They act on the screenshot itself
+and sit under the annotations. By default they are burned into the saved image (Settings menu: "Burn blur / pixelate
+into saved image") so the original, unblurred pixels are *not* left inside the SVG — switch it off only if you want
+them editable after re-opening. **Shadow**: shapes, lines, text, balloons and steps have a drop-shadow checkbox and size.
