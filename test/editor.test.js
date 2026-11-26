@@ -85,6 +85,18 @@ const SHOT = process.env.SHOT; // optional screenshot path
 
   assert.deepStrictEqual(await types(), ['rect', 'ellipse', 'line', 'arrow', 'highlight', 'pen', 'bezier', 'text', 'textbox', 'balloon']);
 
+  // step tool: numbered circles, tool stays active
+  await page.keyboard.press('n');
+  for (const pos of [[700, 400], [740, 400], [780, 400]]) await page.mouse.click(...at(...pos));
+  const steps = await page.evaluate(() => window.__state.shapes.filter((s) => s.type === 'step').map((s) => [s.n, s.fill, s.tc]));
+  assert.deepStrictEqual(steps, [[1, '#ff0000', '#ffffff'], [2, '#ff0000', '#ffffff'], [3, '#ff0000', '#ffffff']], 'steps number 1,2,3');
+  assert.strictEqual(await page.inputValue('#pNum'), '4');
+  await page.fill('#pNum', '10'); await page.press('#pNum', 'Enter');
+  await page.mouse.click(...at(820, 400));
+  assert.strictEqual(await page.evaluate(() => window.__state.shapes.at(-1).n), 10, 'next number can be overridden');
+  await page.keyboard.press('Control+z');
+  assert.strictEqual(await page.inputValue('#pNum'), '4', 'undo frees the number');
+
   // per-tool defaults
   const S = await page.evaluate(() => Object.fromEntries(window.__state.shapes.map((s) => [s.type, s])));
   assert.deepStrictEqual([S.rect.stroke, S.rect.fill, S.ellipse.stroke, S.ellipse.fill], ['#ff0000', 'none', '#ff0000', 'none']);
@@ -138,7 +150,7 @@ const SHOT = process.env.SHOT; // optional screenshot path
 
   // reload the saved svg: shapes come back editable
   await page.evaluate((s) => window.__sharev.loadSvgText(s, 'x.svg'), svg);
-  assert.deepStrictEqual(await types(), ['rect', 'ellipse', 'line', 'arrow', 'highlight', 'pen', 'bezier', 'text', 'textbox', 'balloon']);
+  assert.deepStrictEqual(await types(), ['rect', 'ellipse', 'line', 'arrow', 'highlight', 'pen', 'bezier', 'text', 'textbox', 'balloon', 'step', 'step', 'step']);
   assert.strictEqual(await page.evaluate(() => window.__saved === window.__sharev.buildSvg()), true, 'save/load roundtrip is stable');
 
   // PNG rendering of the SVG works (annotations are painted)

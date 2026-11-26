@@ -13,7 +13,7 @@ const TEXTY = new Set(['text', 'textbox', 'balloon']);
 
 const state = {
   w: 0, h: 0, bg: '', shapes: [], sel: null, tool: 'select', zoom: 1,
-  undo: [], redo: [], nextId: 1, name: '', loaded: false, bz: null, bzHover: null, bzPre: '',
+  undo: [], redo: [], nextId: 1, name: '', loaded: false, bz: null, bzHover: null, bzPre: '', stepOverride: null,
 };
 window.__state = state; // handy for tests / debugging
 
@@ -59,6 +59,7 @@ function layout(s) {
 }
 
 function bounds(s) {
+  if (s.type === 'step') { const r = s.size / 2; return { x: s.x - r, y: s.y - r, w: s.size, h: s.size }; }
   if (BOX.has(s.type)) { layout(s); return { x: s.x, y: s.y, w: s.w, h: s.h }; }
   if (s.type === 'line' || s.type === 'arrow') {
     return { x: Math.min(s.x1, s.x2), y: Math.min(s.y1, s.y2), w: Math.abs(s.x2 - s.x1), h: Math.abs(s.y2 - s.y1) };
@@ -272,6 +273,13 @@ function shapeInner(s, hit) {
     case 'balloon':
       layout(s);
       return `<path d="${balloonPath(s)}" ${st} stroke-linejoin="round"/>` + textEls(s, s.x + PAD, s.y + PAD);
+    case 'step': {
+      const r = s.size / 2, label = String(s.n);
+      const fs = s.size * (label.length > 2 ? 0.4 : label.length > 1 ? 0.5 : 0.58);
+      const ring = s.sw > 0 ? ` stroke="${s.stroke}"${opAttr('stroke-opacity', s.sa)} stroke-width="${s.sw}"` : '';
+      return `<circle cx="${num(s.x)}" cy="${num(s.y)}" r="${num(r)}" fill="${s.fill}"${opAttr('fill-opacity', s.fa)}${ring}/>` +
+        `<text x="${num(s.x)}" y="${num(s.y)}" dy="0.35em" text-anchor="middle" font-family="${esc(FONT)}" font-size="${num(fs)}" font-weight="bold" fill="${s.tc}"${opAttr('fill-opacity', s.ta)}>${esc(label)}</text>`;
+    }
     case 'highlight': {
       const r = `x="${num(s.x)}" y="${num(s.y)}" width="${num(s.w)}" height="${num(s.h)}"`;
       return `<rect ${r} fill="${s.fill}" fill-opacity="${num(s.fa ?? 0.5)}" style="mix-blend-mode:multiply"/>` +
@@ -424,7 +432,7 @@ function restore(json) {
   state.shapes = JSON.parse(json);
   state.nextId = state.shapes.reduce((m, s) => Math.max(m, s.id), 0) + 1;
   if (!byId(state.sel)) state.sel = null;
-  render(); syncProps();
+  render(); syncProps(); refreshNum();
 }
 function undo() { if (!state.undo.length) return; commitEdit(); state.redo.push(snapshot()); restore(state.undo.pop()); }
 function redo() { if (!state.redo.length) return; commitEdit(); state.undo.push(snapshot()); restore(state.redo.pop()); }
@@ -452,6 +460,7 @@ const DEFAULT_OPTS = {
   textbox: { ...BOX_OPTS },
   balloon: { ...BOX_OPTS },
   highlight: { fill: YELLOW, fa: 0.5, stroke: RED, sw: 0 },
+  step: { fill: RED, tc: WHITE, size: 36, stroke: WHITE, sw: 0 }, // numbered red circle
 };
 const OPTS_KEY = 'sharev.toolopts.v1';
 const toolOpts = (() => {
@@ -467,7 +476,7 @@ const P = {
   stroke: $('pStroke'), fill: $('pFill'), fillOn: $('pFillOn'), text: $('pText'),
   width: $('pWidth'), size: $('pSize'), bold: $('pBold'),
   strokeA: $('pStrokeA'), fillA: $('pFillA'), textA: $('pTextA'),
-  headStart: $('pHeadStart'), headEnd: $('pHeadEnd'), headSize: $('pHeadSize'),
+  headStart: $('pHeadStart'), headEnd: $('pHeadEnd'), headSize: $('pHeadSize'), num: $('pNum'),
 };
 const KEYMAP = {
   stroke: 'stroke', fill: 'fill', fillOn: 'fillOn', text: 'tc', width: 'sw', size: 'size', bold: 'bold',
@@ -479,8 +488,13 @@ const RELEVANT = {
   rect: ['stroke', 'fill', 'fillOn', 'width'], ellipse: ['stroke', 'fill', 'fillOn', 'width'],
   line: LINEY, arrow: LINEY, pen: LINEY, bezier: [...LINEY, 'fill', 'fillOn'],
   text: ['text', 'stroke', 'width', 'size', 'bold'], textbox: BOXY, balloon: BOXY, highlight: ['stroke', 'fill', 'width'],
+  step: ['fill', 'text', 'stroke', 'width', 'size', 'num'],
 };
-const STROKE_LABEL = { text: 'Outline', textbox: 'Border', balloon: 'Border' };
+const STROKE_LABEL = { text: 'Outline', textbox: 'Border', balloon: 'Border', step: 'Border' };
+const SIZE_LABEL = { step: 'Size' };
+const maxStep = () => state.shapes.reduce((m, s) => (s.type === 'step' ? Math.max(m, s.n) : m), 0);
+const nextStep = () => (state.stepOverride ?? maxStep() + 1);
+function refreshNum() { if (state.tool === 'step') P.num.value = nextStep(); }
 
 /** The tool whose options the toolbar currently edits: the active tool, or the selected shape's type. */
 function ctxType() {
@@ -497,6 +511,8 @@ function updateControls() {
   }
   const first = P.stroke.closest('label').firstChild;
   if (first && first.nodeType === 3) first.nodeValue = (STROKE_LABEL[type] || 'Line') + ' ';
+  const sz = P.size.closest('label').firstChild;
+  if (sz && sz.nodeType === 3) sz.nodeValue = (SIZE_LABEL[type] || 'Font') + ' ';
 }
 function loadOpts(type) {
   const o = toolOpts[type];
@@ -526,6 +542,7 @@ function syncProps() {
     P.strokeA.value = Math.round((s.sa ?? 1) * 100);
     P.fillA.value = Math.round((s.fa ?? (s.type === 'highlight' ? 0.5 : 1)) * 100);
     P.textA.value = Math.round((s.ta ?? 1) * 100);
+    if (s.type === 'step') P.num.value = s.n;
     if (HEADY.has(s.type)) { P.headStart.checked = headOn(s, false); P.headEnd.checked = headOn(s, true); P.headSize.value = Math.round(headLen(s)); }
   }
   updateControls();
@@ -535,12 +552,13 @@ function onProp(key) {
   return () => {
     const el = P[key];
     const v = el.type === 'checkbox' ? el.checked : el.value;
+    if (key === 'num' && state.tool === 'step') { state.stepOverride = Math.max(0, Math.round(+el.value || 0)); return; }
     const isAlpha = /A$/.test(key) && key !== 'fillOn';
     const store = isAlpha ? clamp((+v || 0) / 100, 0, 1) : ['width', 'size', 'headSize'].includes(key) ? +v || 0 : v;
     if (isAlpha) el.title = el.title.replace(/ \d+%$/, '') + ` ${Math.round(store * 100)}%`;
     // remember the value for the tool (or the selected shape's tool) it belongs to
     const type = ctxType();
-    if (type && toolOpts[type] && KEYMAP[key] in toolOpts[type]) {
+    if (type && toolOpts[type] && KEYMAP[key] && KEYMAP[key] in toolOpts[type]) {
       toolOpts[type][KEYMAP[key]] = store;
       persistOpts();
     }
@@ -552,8 +570,9 @@ function onProp(key) {
       case 'fill': if (s.type === 'highlight' || (s.fill && s.fill !== 'none')) s.fill = v; break;
       case 'fillOn': if (s.type !== 'highlight' && 'fill' in s) s.fill = v ? P.fill.value : 'none'; break;
       case 'text': if (TEXTY.has(s.type)) s.tc = v; break;
-      case 'width': if ('sw' in s) s.sw = clamp(+v || 0, s.type === 'text' || s.type === 'highlight' ? 0 : 1, 60); break;
-      case 'size': if ('size' in s) s.size = clamp(+v || 12, 6, 200); break;
+      case 'width': if ('sw' in s) s.sw = clamp(+v || 0, ['text', 'highlight', 'step'].includes(s.type) ? 0 : 1, 60); break;
+      case 'size': if ('size' in s) s.size = clamp(+v || 12, 6, 400); break;
+      case 'num': if (s.type === 'step') s.n = Math.max(0, Math.round(+v || 0)); break;
       case 'bold': if ('bold' in s) s.bold = v; break;
       case 'strokeA': s.sa = store; break;
       case 'fillA': s.fa = store; break;
@@ -578,8 +597,10 @@ function setTool(t) {
   state.tool = t;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   svg.style.cursor = t === 'select' ? 'default' : 'crosshair';
+  state.stepOverride = null;
   if (t !== 'select') loadOpts(t);
   updateControls();
+  refreshNum();
   renderUI();
 }
 
@@ -622,6 +643,11 @@ function newShape(tool, p) {
       return { ...base, x: p.x, y: p.y, w: 0, h: 0, tx: p.x, ty: p.y, stroke: o.stroke, sw: o.sw, fill: filled, ...txt };
     case 'highlight':
       return { ...base, x: p.x, y: p.y, w: 0, h: 0, fill: o.fill, stroke: o.stroke, sw: o.sw };
+    case 'step': {
+      const n = nextStep();
+      state.stepOverride = null;
+      return { ...base, x: p.x, y: p.y, n, fill: o.fill, tc: o.tc, size: o.size, stroke: o.stroke, sw: o.sw };
+    }
   }
 }
 
@@ -711,6 +737,7 @@ svg.addEventListener('pointermove', (e) => {
   } else if (drag.kind === 'create') {
     if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) * state.zoom > 3) drag.moved = true;
     switch (s.type) {
+      case 'step': s.x = p.x; s.y = p.y; break;
       case 'rect': case 'ellipse': setBox(s, drag.start, p, e.shiftKey); break;
       case 'highlight': case 'textbox': case 'balloon': setBox(s, drag.start, p, false); break;
       case 'line': case 'arrow': { const q = e.shiftKey ? snap45(drag.start, p) : p; s.x2 = q.x; s.y2 = q.y; break; }
@@ -754,6 +781,9 @@ function endDrag() {
   const s = d.s;
   if (d.kind === 'bnode') { render(); return; }
   if (d.kind === 'create') {
+    if (s.type === 'step') { // stays on the tool: every click drops the next number
+      pushUndo(d.pre); state.sel = s.id; render(); refreshNum(); return;
+    }
     if (s.type === 'pen') s.pts = smoothPts(s.pts);
     let keep = true;
     if (BOX.has(s.type)) {
@@ -957,7 +987,7 @@ stage.addEventListener('wheel', (e) => {
 }, { passive: false });
 addEventListener('resize', () => { if (state.loaded && state.zoom <= 1) fit(); });
 
-const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight' };
+const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight', n: 'step' };
 addEventListener('keydown', (e) => {
   const tag = e.target.tagName;
   if (tag === 'TEXTAREA' || (tag === 'INPUT' && ['number', 'text'].includes(e.target.type))) return; // typing; sliders/checkboxes keep shortcuts

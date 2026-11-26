@@ -55,3 +55,7 @@ Line-like tools (line, arrow, freehand, pen) have optional arrowheads at the sta
 setting (arrow defaults to an end head). Every colour (line, fill, text) has its own opacity slider; highlight
 can have an outline (Width 0 = none) and defaults to 50 % yellow.
 Errors (e.g. a hotkey that could not be registered) are written to `ShareV-Data/log.txt`.
+
+**Step tool (`N`)**: every click drops a red numbered circle (1, 2, 3 …). The next number is shown in the
+"No." box and can be changed before clicking; colours, size and border are per-tool options. Select a
+step to change its own number.
