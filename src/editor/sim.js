@@ -213,14 +213,14 @@
       const th = t * D2R, k = K.kin(p, th);
       if (!k) continue;
       const X = xform(th, k).f;
-      for (const q of [{ x: 0, y: 0 }, { x: p.r * Math.cos(th), y: p.r * Math.sin(th) }, { x: k.x, y: p.e }, { x: m.xb - gp, y: p.e }, { x: m.xt + gp, y: p.e }, { x: k.x + 14, y: p.e + 12 }, { x: k.x - 14, y: p.e - 12 }]) pts.push(X(q));
+      for (const q of [{ x: 0, y: 0 }, { x: p.r * Math.cos(th), y: p.r * Math.sin(th) }, { x: k.x, y: p.e }, { x: Math.min(0, m.xb - gp), y: p.e }, { x: m.xt + gp, y: p.e }, { x: k.x + 14, y: p.e + 12 }, { x: k.x - 14, y: p.e - 12 }]) pts.push(X(q));
     }
     if (st.inv === 1) { const R = ringR(); pts.push({ x: -R, y: -R }, { x: R, y: R }); }
     const xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-    const mx = 70, my = 62;
-    const s = Math.min((W - 2 * mx) / Math.max(1, x1 - x0), (H - 2 * my - 30) / Math.max(1, y1 - y0));
-    view = { s, ox: W / 2 - ((x0 + x1) / 2) * s, oy: H / 2 - 14 + ((y0 + y1) / 2) * s };
+    const ml = Math.abs(p.e) > 0.5 ? 170 : 70, mr = 70, my = 62; // room on the left for the offset dimension
+    const s = Math.min((W - ml - mr) / Math.max(1, x1 - x0), (H - 2 * my - 30) / Math.max(1, y1 - y0));
+    view = { s, ox: ml + (W - ml - mr) / 2 - ((x0 + x1) / 2) * s, oy: H / 2 - 14 + ((y0 + y1) / 2) * s };
   }
   const tag = (x, y, t, cls = '') => `<g class="tag ${cls}" transform="translate(${x.toFixed(1)} ${y.toFixed(1)})"><rect x="${-(t.length * 3.6 + 7)}" y="-10" width="${t.length * 7.2 + 14}" height="20" rx="5"/><text text-anchor="middle" y="4.5">${t}</text></g>`;
   const bar = (a, b, w, col, dark) => `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${dark}" stroke-width="${w + 4}" stroke-linecap="round"/><line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${col}" stroke-width="${w}" stroke-linecap="round"/>`;
@@ -233,7 +233,7 @@
     const T = xform(th, sol), X = T.f;
     const O = P(X({ x: 0, y: 0 })), A = P(X({ x: p.r * Math.cos(th), y: p.r * Math.sin(th) })), B = P(X({ x: sol.x, y: p.e }));
     const gp = 0.3 * p.r + 14;
-    const G0 = P(X({ x: m.xb - gp, y: p.e })), G1 = P(X({ x: m.xt + gp, y: p.e }));
+    const G0 = P(X({ x: Math.min(0, m.xb - gp), y: p.e })), G1 = P(X({ x: m.xt + gp, y: p.e })), Oe = P(X({ x: 0, y: p.e }));
     let g = '';
     // protractor (frame 1 only: the angle scale belongs to the guide)
     if (st.inv === 1) {
@@ -245,22 +245,42 @@
         if (major) g += `<text x="${O.x + c * (R + 17)}" y="${O.y + s * (R + 17) + 4}" text-anchor="middle" class="deg">${d}°</text>`;
       }
     }
-    // guide slot (link 1) and dead-centre markers
-    g += `<line x1="${G0.x}" y1="${G0.y}" x2="${G1.x}" y2="${G1.y}" stroke="#4c5463" stroke-width="34" stroke-linecap="round"/><line x1="${G0.x}" y1="${G0.y}" x2="${G1.x}" y2="${G1.y}" stroke="#b8bdc8" stroke-width="30" stroke-linecap="round"/><line x1="${G0.x}" y1="${G0.y}" x2="${G1.x}" y2="${G1.y}" stroke="#2f3541" stroke-width="9" stroke-linecap="round"/>`;
+    // link 1 is ONE rigid body: pivot boss at O2, the connector up/down to the offset line (if e != 0) and the slotted bar
+    const ln = (a, b, w, c) => `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${c}" stroke-width="${w}" stroke-linecap="round"/>`;
+    const hasE = Math.hypot(Oe.x - O.x, Oe.y - O.y) > 4;
+    const parts = (w, c) => ln(G0, G1, w, c) + (hasE ? ln(O, Oe, w, c) : '') + `<circle cx="${O.x.toFixed(1)}" cy="${O.y.toFixed(1)}" r="${w / 2 + 2}" fill="${c}"/>`;
+    g += parts(38, '#454c5b') + parts(34, '#b8bdc8');
+    const tb = P(X({ x: m.xb, y: p.e })), tt = P(X({ x: m.xt, y: p.e }));
+    {
+      const dx = G1.x - G0.x, dy = G1.y - G0.y, dl = Math.hypot(dx, dy) || 1, ux = dx / dl, uy = dy / dl;
+      g += ln({ x: tb.x - ux * 22, y: tb.y - uy * 22 }, { x: tt.x + ux * 22, y: tt.y + uy * 22 }, 10, '#2f3541');
+      // ruler ticks along the slot (one per 10 mm / 0.5 in) so the stroke can be read off
+      const stepMm = st.units === 'SI' ? 10 : 12.7;
+      for (let xm = Math.ceil(m.xb / stepMm) * stepMm; xm <= m.xt + 1e-6; xm += stepMm) {
+        const q = P(X({ x: xm, y: p.e })), major = Math.round(xm / stepMm) % 5 === 0;
+        g += `<line x1="${(q.x - uy * (major ? 12 : 8) - ux * 0).toFixed(1)}" y1="${(q.y + ux * (major ? 12 : 8)).toFixed(1)}" x2="${(q.x - uy * 17).toFixed(1)}" y2="${(q.y + ux * 17).toFixed(1)}" stroke="#2f3541" stroke-width="${major ? 1.6 : 1}"/>`;
+      }
+      g += `<text x="${(G1.x - ux * 2 + uy * 0).toFixed(1)}" y="${(G1.y + 4).toFixed(1)}" class="linklbl small" text-anchor="middle" transform="rotate(0)">1</text>`;
+    }
+    // dead centres and stroke dimension: the arrow tips end exactly on the extension lines
     if (st.inv !== 3) {
-      const Tt = P(X({ x: m.xt, y: p.e })), Bb = P(X({ x: m.xb, y: p.e }));
+      const Tt = tt, Bb = tb;
       const nx = (Tt.y - Bb.y), ny = -(Tt.x - Bb.x), nl = Math.hypot(nx, ny) || 1;
       const off = (q, d) => ({ x: q.x + (nx / nl) * d, y: q.y + (ny / nl) * d });
-      g += `<g class="dc"><line x1="${off(Bb, -26).x}" y1="${off(Bb, -26).y}" x2="${off(Bb, -64).x}" y2="${off(Bb, -64).y}"/><line x1="${off(Tt, -26).x}" y1="${off(Tt, -26).y}" x2="${off(Tt, -64).x}" y2="${off(Tt, -64).y}"/>
+      g += `<g class="dc"><line x1="${off(Bb, -26).x}" y1="${off(Bb, -26).y}" x2="${off(Bb, -66).x}" y2="${off(Bb, -66).y}"/><line x1="${off(Tt, -26).x}" y1="${off(Tt, -26).y}" x2="${off(Tt, -66).x}" y2="${off(Tt, -66).y}"/>
         <line x1="${off(Bb, -56).x}" y1="${off(Bb, -56).y}" x2="${off(Tt, -56).x}" y2="${off(Tt, -56).y}" marker-start="url(#arr)" marker-end="url(#arr)"/>
-        <text x="${off(Bb, -78).x}" y="${off(Bb, -78).y}" text-anchor="middle">BDC</text><text x="${off(Tt, -78).x}" y="${off(Tt, -78).y}" text-anchor="middle">TDC</text></g>`;
+        <text x="${off(Bb, -80).x}" y="${off(Bb, -80).y}" text-anchor="middle">BDC</text><text x="${off(Tt, -80).x}" y="${off(Tt, -80).y}" text-anchor="middle">TDC</text></g>`;
       const mid = off({ x: (Bb.x + Tt.x) / 2, y: (Bb.y + Tt.y) / 2 }, -56);
       g += tag(mid.x, mid.y, `stroke = ${num(u.L(m.stroke), 1)} ${u.len}`, 'dim');
     }
-    // fixed-link symbol
-    if (st.inv === 1 || st.inv === 2) g += ground(O);
-    else if (st.inv === 3) g += ground(A) + ground(B);
-    else g += ground(B);
+    // offset dimension e: between the crank-pivot axis and the slider line, on the side away from the slot
+    if (hasE) {
+      const sx = P(X({ x: -1, y: 0 })), nx = sx.x - O.x, ny = sx.y - O.y, nl = Math.hypot(nx, ny) || 1, ux = nx / nl, uy = ny / nl;
+      const q = (pt, d) => ({ x: pt.x + ux * d, y: pt.y + uy * d });
+      const a = q(O, 52), b = q(Oe, 52), mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      g += `<g class="dc e"><line x1="${q(O, 24).x}" y1="${q(O, 24).y}" x2="${q(O, 60).x}" y2="${q(O, 60).y}"/><line x1="${q(Oe, 24).x}" y1="${q(Oe, 24).y}" x2="${q(Oe, 60).x}" y2="${q(Oe, 60).y}"/>
+        <line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" marker-start="url(#arrE)" marker-end="url(#arrE)"/></g>` + tag(mid.x + ux * 44, mid.y + uy * 4, `e ${num(u.L(p.e), 2)} ${u.len}`, 'edim');
+    }
     // links
     g += bar(O, A, 18, '#2ea898', '#17594f');
     g += bar(A, B, 16, '#8f64d8', '#47306f');
@@ -272,12 +292,19 @@
     g += `<text transform="translate(${(A.x + B.x) / 2} ${(A.y + B.y) / 2 + 4}) rotate(${la.toFixed(1)})" text-anchor="middle" class="linklbl">3 · l ${num(u.L(p.l), 1)} ${u.len}</text>`;
     const ca = Math.atan2(A.y - O.y, A.x - O.x) * R2D, cflip = ca > 90 || ca < -90;
     g += `<text transform="translate(${(O.x + A.x) / 2} ${(O.y + A.y) / 2 + 4}) rotate(${(cflip ? ca + 180 : ca).toFixed(1)})" text-anchor="middle" class="linklbl small">2 · r ${num(u.L(p.r), 1)}</text>`;
-    g += tag(O.x - 26, O.y + 24, 'O₂', 'tl') + tag(A.x, A.y - 24, 'A') + tag(B.x + 22, B.y + 30, 'B');
+    g += tag(O.x - 26, O.y + 24, 'O₂', 'tl') + (st.inv === 3 ? tag(A.x + 6, A.y + 28, 'A') : tag(A.x, A.y - 24, 'A')) + tag(B.x + 22, B.y + 30, 'B');
     g += tag(B.x + 52, B.y - 44, `x = ${num(u.L(sol.x), 1)} ${u.len}`, 'xtag');
-    // crank direction arrow at O
-    g += `<path d="M ${O.x + 34} ${O.y + 6} a 34 34 0 0 0 -30 26" fill="none" stroke="#2ea898" stroke-width="2.4" marker-end="url(#arrT)"/>`;
-    return `<defs><marker id="arr" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="#c2551c"/></marker>
-      <marker id="arrT" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="#2ea898"/></marker>
+    // input rotation arrow: an arc centred on the pivot the input turns about (A when the rod is fixed, otherwise O2)
+    {
+      const C = st.inv === 3 ? A : O, R = 30, ccw = st.inv !== 2;
+      const [a1, a2] = st.inv === 3 ? [55, 125] : [-125, -55];       // degrees, maths convention
+      const pt = (deg) => ({ x: C.x + R * Math.cos(deg * D2R), y: C.y - R * Math.sin(deg * D2R) });
+      const s0 = ccw ? pt(a1) : pt(a2), s1 = ccw ? pt(a2) : pt(a1);
+      g += `<path d="M ${s0.x.toFixed(1)} ${s0.y.toFixed(1)} A ${R} ${R} 0 0 ${ccw ? 0 : 1} ${s1.x.toFixed(1)} ${s1.y.toFixed(1)}" fill="none" stroke="#2ea898" stroke-width="2.6" marker-end="url(#arrT)"/>`;
+    }
+    return `<defs><marker id="arr" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="#c2551c"/></marker>
+      <marker id="arrE" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="#2ea898"/></marker>
+      <marker id="arrT" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L8 4L0 8z" fill="#2ea898"/></marker>
       <pattern id="gridS" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#3a4558" stroke-width=".6"/></pattern>
       <pattern id="gridL" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#gridS)"/><path d="M100 0H0V100" fill="none" stroke="#4a5870" stroke-width="1"/></pattern></defs>
       <rect width="${W}" height="${H}" rx="14" fill="#1b2231"/><rect width="${W}" height="${H}" rx="14" fill="url(#gridL)"/>${g}`;
