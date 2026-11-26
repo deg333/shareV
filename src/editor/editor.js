@@ -626,6 +626,8 @@ function updateButtons() {
   $('bUndo').disabled = !state.undo.length;
   $('bRedo').disabled = !state.redo.length;
   $('bDel').disabled = !state.sels.length;
+  $('bCopyStyle').disabled = !state.sels.length;
+  $('bPasteStyle').disabled = !state.sels.length || !styleClip;
   const has = state.loaded;
   for (const id of ['bSave', 'bSaveAs', 'bPng', 'bCopy']) $(id).disabled = !has;
 }
@@ -849,7 +851,8 @@ function setTool(t) {
   finishBezier();
   state.tool = t;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
-  svg.style.cursor = t === 'select' ? 'default' : 'crosshair';
+  svg.style.cursor = t === 'select' ? 'default' : t === 'painter' ? 'copy' : 'crosshair';
+  if (t === 'painter') flash(styleClip ? 'Style painter: click shapes to apply the copied style (Shift-click picks a new one, Esc to finish)' : 'Style painter: click a shape to copy its style, then click others to apply it');
   state.stepOverride = null;
   if (t !== 'select') loadOpts(t);
   updateControls();
@@ -946,6 +949,16 @@ svg.addEventListener('pointerdown', (e) => {
   commitEdit();
   const p = pt(e);
   const pre = snapshot();
+  if (state.tool === 'painter') { // format painter: the first click (or Shift-click) picks the style, further clicks apply it
+    const hit = e.target.closest && e.target.closest('[data-id]');
+    const s = hit && byId(+hit.dataset.id);
+    if (s) {
+      if (!styleClip || e.shiftKey) copyStyleFrom(s);
+      else { const pre = snapshot(); applyStyleTo(s, styleClip); pushUndo(pre); state.sel = s.id; render(); syncProps(); }
+    }
+    e.preventDefault();
+    return;
+  }
   if (state.tool === 'bezier') {
     let s = state.bz;
     if (!s) {
@@ -1637,6 +1650,7 @@ const SHORTCUTS = [
   ['Tools', [['Select / move', 'V'], ['Rectangle', 'R'], ['Ellipse', 'E'], ['Line', 'L'], ['Arrow', 'A'], ['Pen (bezier curves)', 'P'], ['Freehand (smoothed)', 'F'],
     ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H'], ['Blur region', 'U'], ['Pixelate region', 'X'], ['Recognise text in region (OCR)', 'O'], ['Emoji stamp', 'M']]],
   ['Selecting', [['Select several', 'Drag a box, or Shift/Ctrl + click'], ['Select all', 'Ctrl + A'], ['Deselect / back to Select', 'Esc'], ['Edit text of selected', 'Enter / double-click']]],
+  ['Style', [['Copy style of selected shape', 'Ctrl + Shift + C'], ['Paste style onto selection', 'Ctrl + Shift + V'], ['Style painter tool', 'K'], ['Context menu with these and more', 'right-click a shape']]],
   ['Editing the selection', [['Nudge 1 px', '← ↑ → ↓'], ['Nudge 10 px', 'Shift + arrow keys'], ['Duplicate', 'Ctrl + D'], ['Bring to front', 'Ctrl + ]'],
     ['Send to back', 'Ctrl + ['], ['Delete', 'Del / Backspace'], ['Undo', 'Ctrl + Z'], ['Redo', 'Ctrl + Y / Ctrl + Shift + Z']]],
   ['Drawing', [['Constrain line to 45° / box to square', 'hold Shift'], ['Pen: finish path', 'Enter / double-click'], ['Pen: close path', 'click the first point'],
@@ -1672,6 +1686,92 @@ $('bHelp').onclick = () => toggleHelp();
 $('helpClose').onclick = () => toggleHelp(false);
 help.addEventListener('mousedown', (e) => { if (e.target === help) toggleHelp(false); });
 
+// ------------------------------------------------------------------ copy / paste style (format painter + context menu)
+const STYLE_KEYS = ['stroke', 'sw', 'sa', 'fill', 'fa', 'tc', 'ta', 'bold', 'sh', 'shz'];
+let styleClip = null; // {type, props}
+function copyStyleFrom(s) {
+  const props = {};
+  for (const k of STYLE_KEYS) if (k in s && s[k] !== undefined) props[k] = s[k];
+  if (HEADY.has(s.type)) { props.hs = headOn(s, false); props.he = headOn(s, true); props.hz = headLen(s); }
+  if (s.type === 'emoji') props.size = s.w; else if ('size' in s) props.size = s.size;
+  if ('amt' in s) props.amt = s.amt;
+  styleClip = { type: s.type, props };
+  updateButtons();
+  flash('Style copied - Ctrl+Shift+V (or the paste button / right-click) applies it to the selection');
+}
+/** Apply only what makes sense for the target's type (colours, widths, opacity, shadow, arrowheads, font...). */
+function applyStyleTo(t, clip) {
+  const p = clip.props, same = t.type === clip.type;
+  if ('stroke' in t && p.stroke !== undefined) t.stroke = p.stroke;
+  if ('sw' in t && p.sw !== undefined && (p.sw > 0 || ['text', 'highlight', 'step'].includes(t.type))) t.sw = p.sw;
+  if (p.sa !== undefined && 'stroke' in t) t.sa = p.sa;
+  if ('fill' in t && p.fill !== undefined && !(t.type === 'highlight' && p.fill === 'none')) t.fill = p.fill;
+  if ('fill' in t && p.fa !== undefined) t.fa = p.fa;
+  if ('tc' in t && p.tc !== undefined) { t.tc = p.tc; if (p.ta !== undefined) t.ta = p.ta; }
+  if ('bold' in t && p.bold !== undefined) t.bold = p.bold;
+  if (p.size !== undefined && (same || (TEXTY.has(t.type) && 'size' in t && clip.type !== 'emoji' && clip.type !== 'step'))) {
+    if (t.type === 'emoji') { const c = { x: t.x + t.w / 2, y: t.y + t.h / 2 }; t.w = t.h = p.size; t.x = c.x - p.size / 2; t.y = c.y - p.size / 2; } else if ('size' in t) t.size = p.size;
+  }
+  if (SHADOWY.has(t.type) && p.sh !== undefined) { t.sh = p.sh; t.shz = p.shz || 4; }
+  if (HEADY.has(t.type) && p.hs !== undefined) { t.hs = p.hs; t.he = p.he; t.hz = p.hz; }
+  if (same && 'amt' in t && p.amt !== undefined) t.amt = p.amt;
+}
+function copyStyleSel() { const s = byId(state.sel); if (s) copyStyleFrom(s); }
+function pasteStyleSel() {
+  const sel = selShapes();
+  if (!styleClip || !sel.length) return;
+  const pre = snapshot();
+  sel.forEach((s) => applyStyleTo(s, styleClip));
+  pushUndo(pre); render(); syncProps();
+  flash(`Style pasted to ${sel.length} shape${sel.length === 1 ? '' : 's'}`);
+}
+// ---- right-click menu
+const ctx = $('ctx');
+function hideCtx() { ctx.hidden = true; }
+function showCtx(x, y) {
+  const n = state.sels.length;
+  const items = [
+    ['copy', 'Copy style', 'Ctrl+Shift+C', true],
+    ['paste', 'Paste style' + (n > 1 ? ` to ${n} shapes` : ''), 'Ctrl+Shift+V', !!styleClip],
+    ['paint', 'Paint this style onto other shapes', 'K', true],
+    null,
+    ['dup', 'Duplicate', 'Ctrl+D', true],
+    ['front', 'Bring to front', 'Ctrl+]', true],
+    ['back', 'Send to back', 'Ctrl+[', true],
+    ['del', 'Delete', 'Del', true],
+  ];
+  ctx.innerHTML = items.map((it) => it ? `<button data-a="${it[0]}"${it[3] ? '' : ' disabled'}><span>${it[1]}</span><kbd>${it[2]}</kbd></button>` : '<hr>').join('');
+  ctx.hidden = false;
+  ctx.style.left = Math.max(4, Math.min(x, innerWidth - ctx.offsetWidth - 4)) + 'px';
+  ctx.style.top = Math.max(4, Math.min(y, innerHeight - ctx.offsetHeight - 4)) + 'px';
+}
+ctx.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.disabled) return;
+  hideCtx();
+  ({
+    copy: copyStyleSel, paste: pasteStyleSel, dup: duplicateSel, del: deleteSel,
+    front: () => reorder(1), back: () => reorder(-1),
+    paint: () => { copyStyleSel(); setTool('painter'); },
+  })[b.dataset.a]();
+});
+svg.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const hit = e.target.closest && e.target.closest('[data-id]');
+  if (!state.loaded || !hit || !['select', 'painter'].includes(state.tool)) { hideCtx(); return; }
+  const id = +hit.dataset.id;
+  state.sels = state.sels.includes(id) ? [...state.sels.filter((x) => x !== id), id] : [id];
+  if (state.tool === 'painter') setTool('select');
+  syncProps(); render();
+  showCtx(e.clientX, e.clientY);
+});
+// no browser menu (Inspect, Back...) anywhere except in text fields, where cut/copy/paste is useful
+document.addEventListener('contextmenu', (e) => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
+document.addEventListener('mousedown', (e) => { if (!ctx.hidden && !ctx.contains(e.target)) hideCtx(); });
+addEventListener('blur', hideCtx);
+$('bCopyStyle').onclick = copyStyleSel;
+$('bPasteStyle').onclick = pasteStyleSel;
+
 // ------------------------------------------------------------------ wiring
 document.querySelectorAll('[data-cap]').forEach((b) => b.addEventListener('click', () => window.api.capture(b.dataset.cap)));
 document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
@@ -1694,7 +1794,7 @@ stage.addEventListener('wheel', (e) => {
 }, { passive: false });
 addEventListener('resize', () => { if (state.loaded && state.zoom <= 1) fit(); });
 
-const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight', n: 'step', u: 'blur', x: 'pixelate', o: 'ocr', m: 'emoji' };
+const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight', n: 'step', u: 'blur', x: 'pixelate', o: 'ocr', m: 'emoji', k: 'painter' };
 addEventListener('keydown', (e) => {
   const tag = e.target.tagName;
   if (tag === 'TEXTAREA' || (tag === 'INPUT' && ['number', 'text'].includes(e.target.type))) return; // typing; sliders/checkboxes keep shortcuts
@@ -1707,6 +1807,8 @@ addEventListener('keydown', (e) => {
     else if (k === 'y') redo();
     else if (k === 's') saveSvg(e.shiftKey);
     else if (k === 'o') openFile();
+    else if (k === 'c' && e.shiftKey) copyStyleSel();
+    else if (k === 'v' && e.shiftKey) pasteStyleSel();
     else if (k === 'c') copyImage();
     else if (k === 'd') duplicateSel();
     else if (k === 'a') { state.tool === 'select' && (state.sels = state.shapes.map((x) => x.id)); syncProps(); render(); }

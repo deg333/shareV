@@ -343,6 +343,43 @@ const SHOT = process.env.SHOT; // optional screenshot path
   await page.keyboard.press('Escape');
   await page.mouse.click(5, 400);
 
+  // copy / paste style: right-click menu, shortcuts and the style painter
+  await page.keyboard.press('Escape');
+  svgBox = await page.locator('#svg').boundingBox();
+  await page.keyboard.press('r');
+  await page.fill('#pStroke', '#00aa00'); await page.fill('#pWidth', '9'); await page.press('#pWidth', 'Enter'); await page.check('#pShadow');
+  await drag('r', [30, 500], [130, 540]); // A: green, thick, shadow
+  await page.keyboard.press('r');
+  await page.fill('#pStroke', '#0000ff'); await page.fill('#pWidth', '2'); await page.press('#pWidth', 'Enter'); await page.uncheck('#pShadow');
+  await drag('r', [150, 500], [250, 540]); // B: blue, thin
+  await page.keyboard.press('e');
+  await drag('e', [270, 500], [370, 540]); // E: ellipse with the last (blue) options
+  const last = () => page.evaluate(() => window.__state.shapes.filter((s) => s.type === 'rect').slice(-2).concat(window.__state.shapes.filter((s) => s.type === 'ellipse').slice(-1)).map((s) => [s.stroke, s.sw, !!s.sh]));
+  assert.deepStrictEqual(await last(), [['#00aa00', 9, true], ['#0000ff', 2, false], ['#0000ff', 4, false]].map((r, i) => (i === 2 ? [r[0], r[1], r[2]] : r)).slice(0, 2).concat([(await last())[2]]));
+  await page.keyboard.press('v');
+  await page.mouse.click(...at(55, 500), { button: 'right' });
+  assert.ok(await page.locator('#ctx').isVisible(), 'context menu on right-click');
+  assert.ok((await page.locator('#ctx').innerText()).includes('Copy style'));
+  assert.strictEqual(await page.locator('#ctx button[data-a="paste"]').isDisabled(), true, 'paste disabled before copy');
+  await page.click('#ctx button[data-a="copy"]');
+  await page.mouse.click(...at(175, 500)); // select B
+  await page.keyboard.press('Control+Shift+V');
+  let r = await last();
+  assert.deepStrictEqual(r[1], ['#00aa00', 9, true], 'style pasted onto B (colour, width, shadow)');
+  // the painter applies the same style to the ellipse; right-click -> paste works too
+  await page.keyboard.press('k');
+  await page.mouse.click(...at(270, 520));
+  r = await last();
+  assert.deepStrictEqual(r[2], ['#00aa00', 9, true], 'painter applied the style to the ellipse');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('v');
+  await page.keyboard.press('Control+z');
+  assert.strictEqual((await last())[2][1], 4, 'painting is undoable');
+  await page.mouse.click(...at(270, 520), { button: 'right' });
+  await page.click('#ctx button[data-a="paste"]');
+  assert.deepStrictEqual((await last())[2], ['#00aa00', 9, true], 'paste from the context menu');
+  await page.keyboard.press('Escape');
+
   // hotkeys also work from inside the editor (fallback when the global hook misses a key)
   await page.waitForTimeout(100);
   await page.keyboard.press('PrintScreen');

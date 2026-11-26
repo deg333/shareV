@@ -1,4 +1,4 @@
-blob.js bundles the 291 SVG emoji from the blob emoji set supplied with this project (Blobmoji, derived from Google's
+blob.js bundles the the bundled SVG emoji from the blob emoji set supplied with this project (Blobmoji, derived from Google's
 Noto Emoji; Apache License 2.0 - https://github.com/C1710/blobmoji). Regenerate with tools/gen_emoji.py.
 Emoji fetched from svgmoji (https://github.com/svgmoji/svgmoji) keep their own licences (Noto/Blobmoji: Apache-2.0,
 OpenMoji: CC BY-SA 4.0, Twemoji: CC BY 4.0) - credit them if you publish images that use them.

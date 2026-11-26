@@ -11,7 +11,7 @@ TONES = {0x1F3FB: 'light skin tone', 0x1F3FC: 'medium-light skin tone', 0x1F3FD:
 def cp_name(cp):
     if cp in TONES: return TONES[cp]
     if cp == 0x200D: return None
-    if cp in (0xFE0F, 0xFE0E): return None
+    if cp in (0xFE0F, 0xFE0E, 0x2063, 0x2060): return None
     try: return unicodedata.name(chr(cp)).lower()
     except ValueError: return 'u+%x' % cp
 

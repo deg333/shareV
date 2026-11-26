@@ -82,7 +82,7 @@ as real, editable SVG text at its original position — optionally painting over
 background colour ("cover original text") and using the sampled text colour. Blur/pixelate are applied before
 recognising, so redacted text is never read.
 
-**Emoji stamps (`M`)**: pick an emoji from the bundled blob set (291 SVGs, searchable) and click to stamp it or drag to
+**Emoji stamps (`M`)**: pick an emoji from the bundled blob set (476 SVGs, searchable) and click to stamp it or drag to
 size it; select it to resize from a corner (stays square), change "Size", add a shadow, or swap it for another emoji.
 Emoji are embedded in the SVG as real vector artwork (ids/classes are scoped per stamp). Add more from
 [svgmoji](https://github.com/svgmoji/svgmoji): paste an emoji (e.g. from the Win+. panel) or a hex code, choose
@@ -105,3 +105,9 @@ displayed size. The first capture after starting ShareV can still be slightly sl
 **Hotkeys while ShareV has focus**: besides the global keyboard hook, the editor itself also triggers the capture if it
 receives a PrintScreen combination. `ShareV-Data/log.txt` records the hook installing, each capture and how long it took
 (and if a capture was ignored because another was still running) - send it along if a hotkey ever misbehaves.
+
+**Copy / paste style**: right-click a shape for a menu (Copy style, Paste style, Paint this style onto other shapes,
+Duplicate, Bring to front, Send to back, Delete). `Ctrl+Shift+C` / `Ctrl+Shift+V` (or the two brush/clipboard buttons
+in the top bar) copy a shape's line/fill colours, widths, opacity, text colour/bold/size, shadow and arrowheads and
+paste what applies onto every selected shape (even of a different type). The **Style painter** tool (`K`) copies on the
+first click and applies on each further click (Shift-click picks a new style, `Esc` finishes).
