@@ -41,7 +41,8 @@
     <button data-tool="ellipse" title="Ellipse (E)"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="6"/></svg></button>
     <button data-tool="line" title="Line (L)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5"/></svg></button>
     <button data-tool="arrow" title="Arrow (A)"><svg viewBox="0 0 24 24"><path d="M5 19L18 6M9 6h9v9"/></svg></button>
-    <button data-tool="pen" title="Freehand (P)"><svg viewBox="0 0 24 24"><path d="M3 17c3-8 5-8 6-3s3 4 5-1 4-5 7-1"/></svg></button>
+    <button data-tool="bezier" title="Pen - bezier curves (P): click for corners, drag for curves, click first point to close, Enter / double-click to finish"><svg viewBox="0 0 24 24"><path d="M4 18C8 4 16 4 20 18"/><rect x="2.5" y="16.5" width="3" height="3"/><rect x="18.5" y="16.5" width="3" height="3"/><circle cx="8.5" cy="6.5" r="1.2"/><circle cx="15.5" cy="6.5" r="1.2"/></svg></button>
+    <button data-tool="pen" title="Freehand, smoothed (F)"><svg viewBox="0 0 24 24"><path d="M3 17c3-8 5-8 6-3s3 4 5-1 4-5 7-1"/></svg></button>
     <button data-tool="text" title="Text (T)"><svg viewBox="0 0 24 24"><path d="M6 6h12M12 6v13M9 19h6"/></svg></button>
     <button data-tool="textbox" title="Text box (B)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1"/><path d="M7 10h10M7 14h6"/></svg></button>
     <button data-tool="balloon" title="Balloon (C)"><svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-5 4v-4H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg></button>
@@ -53,7 +54,7 @@
     <label title="Fill color (also highlight colour)">Fill <input type="color" id="pFill" value="#fff176"></label>
     <label class="chk" title="Fill rectangles and ellipses"><input type="checkbox" id="pFillOn"> fill</label>
     <label title="Text color">Text <input type="color" id="pText" value="#1a1a1a"></label>
-    <label title="Line width">Width <input type="number" id="pWidth" min="1" max="60" value="4"></label>
+    <label title="Line width">Width <input type="number" id="pWidth" min="0" max="60" value="4"></label>
     <label title="Font size">Font <input type="number" id="pSize" min="6" max="200" value="28"></label>
     <label class="chk" title="Bold text"><input type="checkbox" id="pBold"> <b>B</b></label>
   </div>

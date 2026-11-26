@@ -15,7 +15,7 @@ Also available from the tray icon and the editor toolbar. Hotkeys, save folder a
 `copyToClipboard` are in `ShareV-Data/settings.json`.
 
 ## Annotation tools (all SVG)
-Rectangle `R`, ellipse `E`, line `L`, arrow `A`, freehand `P`, text `T`, text box `B`,
+Rectangle `R`, ellipse `E`, line `L`, arrow `A`, freehand (smoothed) `F`, pen with bezier curves `P` (click = corner, drag = curve, click the first point to close, Enter/double-click to finish), text `T`, text box `B`,
 balloon `C`, highlight `H`, select/move/resize `V`. Double-click (or `Enter`) edits text;
 drag the orange handle to aim a balloon's tail. `Shift` constrains lines to 45° and boxes to squares.
 
@@ -45,3 +45,8 @@ npm test                 # headless editor tests (needs playwright)
 * Capture uses the `xcap` crate. Active window = the focused window, or the top-most normal window
   if focus can't be determined. Wayland and macOS need the system screen-capture permission.
 * Only one instance should run at a time (a second one fails to register the hotkeys).
+
+## Tool options
+Each tool remembers its own colour / width / fill / font settings (stored in the app's local storage).
+Defaults: rectangle & ellipse red, no fill; text white with a red outline; text box & balloon red fill,
+white border and white text; highlight yellow (255,255,0).

@@ -13,7 +13,7 @@ const TEXTY = new Set(['text', 'textbox', 'balloon']);
 
 const state = {
   w: 0, h: 0, bg: '', shapes: [], sel: null, tool: 'select', zoom: 1,
-  undo: [], redo: [], nextId: 1, name: '', loaded: false,
+  undo: [], redo: [], nextId: 1, name: '', loaded: false, bz: null, bzHover: null, bzPre: '',
 };
 window.__state = state; // handy for tests / debugging
 
@@ -63,8 +63,9 @@ function bounds(s) {
   if (s.type === 'line' || s.type === 'arrow') {
     return { x: Math.min(s.x1, s.x2), y: Math.min(s.y1, s.y2), w: Math.abs(s.x2 - s.x1), h: Math.abs(s.y2 - s.y1) };
   }
-  if (s.type === 'pen') {
-    const xs = s.pts.map((p) => p[0]), ys = s.pts.map((p) => p[1]);
+  if (s.type === 'pen' || s.type === 'bezier') {
+    const pts = s.type === 'pen' ? s.pts : s.nodes.map((n) => [n.x, n.y]);
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     const x = Math.min(...xs), y = Math.min(...ys);
     return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
   }
@@ -78,7 +79,9 @@ function textEls(s, x, y) {
   if (s._editing || !s.text) return '';
   const first = y + s.size * 0.95;
   const tsp = s._lines.map((l, i) => `<tspan x="${num(x)}" y="${num(first + i * lineH(s))}">${esc(l) || ' '}</tspan>`).join('');
-  return `<text font-family="${esc(FONT)}" font-size="${s.size}"${s.bold ? ' font-weight="bold"' : ''} fill="${s.tc}" xml:space="preserve">${tsp}</text>`;
+  const outline = s.type === 'text' && s.sw > 0 && s.stroke && s.stroke !== 'none'
+    ? ` stroke="${s.stroke}" stroke-width="${s.sw * 2}" stroke-linejoin="round" paint-order="stroke"` : '';
+  return `<text font-family="${esc(FONT)}" font-size="${s.size}"${s.bold ? ' font-weight="bold"' : ''} fill="${s.tc}"${outline} xml:space="preserve">${tsp}</text>`;
 }
 
 function balloonPath(s) {
@@ -105,12 +108,46 @@ function balloonPath(s) {
 function penPath(pts) {
   if (pts.length === 1) return `M${num(pts[0][0])} ${num(pts[0][1])}l0 0`;
   let d = `M${num(pts[0][0])} ${num(pts[0][1])}`;
-  for (let i = 1; i < pts.length - 1; i++) {
-    const mx = (pts[i][0] + pts[i + 1][0]) / 2, my = (pts[i][1] + pts[i + 1][1]) / 2;
-    d += `Q${num(pts[i][0])} ${num(pts[i][1])} ${num(mx)} ${num(my)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    d += `C${num(p1[0] + (p2[0] - p0[0]) / 6)} ${num(p1[1] + (p2[1] - p0[1]) / 6)} ` +
+      `${num(p2[0] - (p3[0] - p1[0]) / 6)} ${num(p2[1] - (p3[1] - p1[1]) / 6)} ${num(p2[0])} ${num(p2[1])}`;
   }
-  const l = pts[pts.length - 1];
-  return d + `L${num(l[0])} ${num(l[1])}`;
+  return d;
+}
+function rdp(pts, eps) {
+  if (pts.length < 3) return pts;
+  const [ax, ay] = pts[0], [bx, by] = pts[pts.length - 1];
+  const len = Math.hypot(bx - ax, by - ay) || 1;
+  let idx = 0, dmax = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = Math.abs((by - ay) * pts[i][0] - (bx - ax) * pts[i][1] + bx * ay - by * ax) / len;
+    if (d > dmax) { dmax = d; idx = i; }
+  }
+  if (dmax <= eps) return [pts[0], pts[pts.length - 1]];
+  return rdp(pts.slice(0, idx + 1), eps).slice(0, -1).concat(rdp(pts.slice(idx), eps));
+}
+/** Remove hand jitter: weighted moving average (x2) then Douglas-Peucker; the renderer splines the rest. */
+function smoothPts(pts) {
+  if (pts.length < 3) return pts;
+  let a = pts;
+  for (let k = 0; k < 3; k++) {
+    const b = [a[0]];
+    for (let i = 1; i < a.length - 1; i++) {
+      b.push([(a[i - 1][0] + 2 * a[i][0] + a[i + 1][0]) / 4, (a[i - 1][1] + 2 * a[i][1] + a[i + 1][1]) / 4]);
+    }
+    b.push(a[a.length - 1]);
+    a = b;
+  }
+  return rdp(a, 1.2);
+}
+function bezierPath(s) {
+  const n = s.nodes;
+  const seg = (a, b) => `C${num(a.hx)} ${num(a.hy)} ${num(2 * b.x - b.hx)} ${num(2 * b.y - b.hy)} ${num(b.x)} ${num(b.y)}`;
+  let d = `M${num(n[0].x)} ${num(n[0].y)}`;
+  for (let i = 1; i < n.length; i++) d += seg(n[i - 1], n[i]);
+  if (s.closed && n.length > 2) d += seg(n[n.length - 1], n[0]) + 'Z';
+  return d;
 }
 
 function arrowSvg(s, hit) {
@@ -141,6 +178,12 @@ function shapeInner(s, hit) {
       const d = penPath(s.pts);
       return (hit ? `<path class="hit" d="${d}" fill="none" stroke="transparent" stroke-width="${Math.max(s.sw, 14)}"/>` : '') +
         `<path d="${d}" fill="none" stroke="${s.stroke}" stroke-width="${s.sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+    case 'bezier': {
+      const d = bezierPath(s);
+      const fill = s.closed && s.fill && s.fill !== 'none' ? s.fill : 'none';
+      return (hit ? `<path class="hit" d="${d}" fill="none" stroke="transparent" stroke-width="${Math.max(s.sw, 14)}"/>` : '') +
+        `<path d="${d}" fill="${fill}" stroke="${s.stroke}" stroke-width="${s.sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
     case 'text': {
       layout(s);
@@ -188,11 +231,40 @@ function handlePoints(s) {
   if (s.type === 'balloon') hp.tail = [s.tx, s.ty];
   return hp;
 }
+function bezierGuides(s, interactive, z) {
+  let out = '';
+  const hs = 9 / z, r = 4.5 / z, sw = 1 / z;
+  s.nodes.forEach((n, i) => {
+    const gx = 2 * n.x - n.hx, gy = 2 * n.y - n.hy;
+    const has = Math.hypot(n.hx - n.x, n.hy - n.y) > 0.5;
+    if (has) {
+      out += `<line x1="${gx}" y1="${gy}" x2="${n.hx}" y2="${n.hy}" stroke="#4da3ff" stroke-width="${sw}" pointer-events="none"/>`;
+      for (const [name, x, y] of [['h' + i, n.hx, n.hy], ['g' + i, gx, gy]]) {
+        out += `<circle ${interactive ? `data-h="${name}"` : 'pointer-events="none"'} cx="${x}" cy="${y}" r="${r}" fill="#4da3ff" stroke="#fff" stroke-width="${sw}" style="cursor:move"/>`;
+      }
+    }
+    out += `<rect ${interactive ? `data-h="n${i}"` : 'pointer-events="none"'} x="${n.x - hs / 2}" y="${n.y - hs / 2}" width="${hs}" height="${hs}" fill="${i === 0 ? '#ffb020' : '#fff'}" stroke="#2677d4" stroke-width="${sw}" style="cursor:move"/>`;
+  });
+  return out;
+}
 function renderUI() {
+  const z = state.zoom;
+  const bz = state.bz;
+  if (bz) {
+    let out = bezierGuides(bz, false, z);
+    const h = state.bzHover, last = bz.nodes[bz.nodes.length - 1];
+    if (h && !drag) {
+      const prev = { x: last.x, y: last.y, hx: last.hx, hy: last.hy };
+      out += `<path d="${bezierPath({ nodes: [prev, { x: h.x, y: h.y, hx: h.x, hy: h.y }] })}" fill="none" stroke="#4da3ff" stroke-width="${1.5 / z}" stroke-dasharray="${5 / z} ${4 / z}" pointer-events="none"/>`;
+    }
+    ui.innerHTML = out;
+    return;
+  }
   const s = byId(state.sel);
   if (!s || state.tool !== 'select') { ui.innerHTML = ''; return; }
-  const z = state.zoom, b = bounds(s), pad = 3 / z, hs = 9 / z;
+  const b = bounds(s), pad = 3 / z, hs = 9 / z;
   let out = `<rect x="${b.x - pad}" y="${b.y - pad}" width="${b.w + 2 * pad}" height="${b.h + 2 * pad}" fill="none" stroke="#4da3ff" stroke-width="${1 / z}" stroke-dasharray="${4 / z} ${3 / z}" pointer-events="none"/>`;
+  if (s.type === 'bezier') out += bezierGuides(s, true, z);
   for (const [name, [px, py]] of Object.entries(handlePoints(s))) {
     out += `<rect data-h="${name}" x="${px - hs / 2}" y="${py - hs / 2}" width="${hs}" height="${hs}" fill="${name === 'tail' ? '#ffb020' : '#fff'}" stroke="#2677d4" stroke-width="${1 / z}" style="cursor:${HANDLE_CURSOR[name]}"/>`;
   }
@@ -286,35 +358,104 @@ function updateButtons() {
   for (const id of ['bSave', 'bSaveAs', 'bPng', 'bCopy']) $(id).disabled = !has;
 }
 
-// ------------------------------------------------------------------ properties
+// ------------------------------------------------------------------ per-tool options
+const RED = '#ff0000', WHITE = '#ffffff', YELLOW = '#ffff00';
+const LINE_OPTS = { stroke: RED, sw: 4 };
+const BOX_OPTS = { fill: RED, fillOn: true, stroke: WHITE, sw: 3, tc: WHITE, size: 24, bold: false };
+const DEFAULT_OPTS = {
+  rect: { stroke: RED, sw: 4, fill: YELLOW, fillOn: false },
+  ellipse: { stroke: RED, sw: 4, fill: YELLOW, fillOn: false },
+  line: { ...LINE_OPTS },
+  arrow: { ...LINE_OPTS },
+  pen: { ...LINE_OPTS },
+  bezier: { ...LINE_OPTS, fill: RED, fillOn: false },
+  text: { tc: WHITE, stroke: RED, sw: 5, size: 28, bold: true }, // white text with a red outline
+  textbox: { ...BOX_OPTS },
+  balloon: { ...BOX_OPTS },
+  highlight: { fill: YELLOW },
+};
+const OPTS_KEY = 'sharev.toolopts.v1';
+const toolOpts = (() => {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(OPTS_KEY) || '{}') || {}; } catch { /* storage unavailable */ }
+  const o = {};
+  for (const k of Object.keys(DEFAULT_OPTS)) o[k] = { ...DEFAULT_OPTS[k], ...(saved[k] || {}) };
+  return o;
+})();
+const persistOpts = () => { try { localStorage.setItem(OPTS_KEY, JSON.stringify(toolOpts)); } catch { /* ignore */ } };
+
 const P = {
   stroke: $('pStroke'), fill: $('pFill'), fillOn: $('pFillOn'), text: $('pText'),
   width: $('pWidth'), size: $('pSize'), bold: $('pBold'),
 };
+const KEYMAP = { stroke: 'stroke', fill: 'fill', fillOn: 'fillOn', text: 'tc', width: 'sw', size: 'size', bold: 'bold' };
+const LINEY = ['stroke', 'width'];
+const BOXY = ['stroke', 'fill', 'fillOn', 'text', 'width', 'size', 'bold'];
+const RELEVANT = {
+  rect: ['stroke', 'fill', 'fillOn', 'width'], ellipse: ['stroke', 'fill', 'fillOn', 'width'],
+  line: LINEY, arrow: LINEY, pen: LINEY, bezier: ['stroke', 'fill', 'fillOn', 'width'],
+  text: ['text', 'stroke', 'width', 'size', 'bold'], textbox: BOXY, balloon: BOXY, highlight: ['fill'],
+};
+const STROKE_LABEL = { text: 'Outline', textbox: 'Border', balloon: 'Border' };
+
+/** The tool whose options the toolbar currently edits: the active tool, or the selected shape's type. */
+function ctxType() {
+  if (state.tool !== 'select') return state.tool;
+  const s = byId(state.sel);
+  return s ? s.type : null;
+}
+function updateControls() {
+  const type = ctxType();
+  for (const k of Object.keys(P)) {
+    const label = P[k].closest('label');
+    label.hidden = !!(type && RELEVANT[type] && !RELEVANT[type].includes(k));
+  }
+  const first = P.stroke.closest('label').firstChild;
+  if (first && first.nodeType === 3) first.nodeValue = (STROKE_LABEL[type] || 'Line') + ' ';
+}
+function loadOpts(type) {
+  const o = toolOpts[type];
+  if (!o) return;
+  if ('stroke' in o) P.stroke.value = o.stroke;
+  if ('fill' in o) P.fill.value = o.fill;
+  if ('fillOn' in o) P.fillOn.checked = o.fillOn;
+  if ('tc' in o) P.text.value = o.tc;
+  if ('sw' in o) P.width.value = o.sw;
+  if ('size' in o) P.size.value = o.size;
+  if ('bold' in o) P.bold.checked = o.bold;
+}
 function syncProps() {
   const s = byId(state.sel);
-  if (!s) return;
-  if (s.stroke) P.stroke.value = s.stroke;
-  if (s.fill && s.fill !== 'none') P.fill.value = s.fill;
-  if ('fill' in s && s.type !== 'highlight') P.fillOn.checked = s.fill !== 'none';
-  if (s.tc) P.text.value = s.tc;
-  if (s.sw) P.width.value = s.sw;
-  if (s.size) P.size.value = s.size;
-  if ('bold' in s) P.bold.checked = !!s.bold;
+  if (s) {
+    if (s.stroke) P.stroke.value = s.stroke;
+    if (s.fill && s.fill !== 'none') P.fill.value = s.fill;
+    if ('fill' in s && s.type !== 'highlight') P.fillOn.checked = s.fill !== 'none';
+    if (s.tc) P.text.value = s.tc;
+    if ('sw' in s) P.width.value = s.sw;
+    if (s.size) P.size.value = s.size;
+    if ('bold' in s) P.bold.checked = !!s.bold;
+  }
+  updateControls();
 }
 let propPre = null;
 function onProp(key) {
   return () => {
-    const s = byId(state.sel);
-    if (!s) return;
-    if (propPre === null) propPre = snapshot();
     const v = P[key].type === 'checkbox' ? P[key].checked : P[key].value;
+    // remember the value for the tool (or the selected shape's tool) it belongs to
+    const type = ctxType();
+    if (type && toolOpts[type] && KEYMAP[key] in toolOpts[type]) {
+      toolOpts[type][KEYMAP[key]] = key === 'width' || key === 'size' ? +v || 0 : v;
+      persistOpts();
+    }
+    const s = byId(state.sel);
+    if (!s || state.tool !== 'select') return;
+    if (propPre === null) propPre = snapshot();
     switch (key) {
       case 'stroke': if ('stroke' in s) s.stroke = v; break;
       case 'fill': if (s.type === 'highlight' || (s.fill && s.fill !== 'none')) s.fill = v; break;
       case 'fillOn': if (s.type !== 'highlight' && 'fill' in s) s.fill = v ? P.fill.value : 'none'; break;
       case 'text': if (TEXTY.has(s.type)) s.tc = v; break;
-      case 'width': if ('sw' in s) s.sw = clamp(+v || 1, 1, 60); break;
+      case 'width': if ('sw' in s) s.sw = clamp(+v || 0, s.type === 'text' ? 0 : 1, 60); break;
       case 'size': if ('size' in s) s.size = clamp(+v || 12, 6, 200); break;
       case 'bold': if ('bold' in s) s.bold = v; break;
     }
@@ -329,31 +470,52 @@ for (const k of Object.keys(P)) {
 // ------------------------------------------------------------------ tools
 function setTool(t) {
   commitEdit();
+  finishBezier();
   state.tool = t;
   document.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t));
   svg.style.cursor = t === 'select' ? 'default' : 'crosshair';
+  if (t !== 'select') loadOpts(t);
+  updateControls();
   renderUI();
 }
 
+function finishBezier() {
+  const s = state.bz;
+  if (!s) return;
+  state.bz = null; state.bzHover = null;
+  if (s.nodes.length < 2) {
+    state.shapes = state.shapes.filter((x) => x !== s);
+    state.sel = null;
+  } else {
+    pushUndo(state.bzPre);
+    state.sel = s.id;
+    setTool('select');
+  }
+  render();
+}
+
 function newShape(tool, p) {
-  const common = { id: state.nextId++, type: tool };
-  const stroke = P.stroke.value, sw = clamp(+P.width.value || 4, 1, 60);
-  const txt = { text: '', size: clamp(+P.size.value || 28, 6, 200), bold: P.bold.checked, tc: P.text.value };
+  const o = toolOpts[tool];
+  const base = { id: state.nextId++, type: tool };
+  const filled = o.fillOn ? o.fill : 'none';
+  const txt = { text: '', size: o.size, bold: !!o.bold, tc: o.tc };
   switch (tool) {
     case 'rect': case 'ellipse':
-      return { ...common, x: p.x, y: p.y, w: 0, h: 0, stroke, sw, fill: P.fillOn.checked ? P.fill.value : 'none' };
+      return { ...base, x: p.x, y: p.y, w: 0, h: 0, stroke: o.stroke, sw: o.sw, fill: filled };
     case 'line': case 'arrow':
-      return { ...common, x1: p.x, y1: p.y, x2: p.x, y2: p.y, stroke, sw };
+      return { ...base, x1: p.x, y1: p.y, x2: p.x, y2: p.y, stroke: o.stroke, sw: o.sw };
     case 'pen':
-      return { ...common, pts: [[p.x, p.y]], stroke, sw };
+      return { ...base, pts: [[p.x, p.y]], stroke: o.stroke, sw: o.sw };
+    case 'bezier':
+      return { ...base, nodes: [], closed: false, stroke: o.stroke, sw: o.sw, fill: filled };
     case 'text':
-      return { ...common, x: p.x, y: p.y, ...txt };
+      return { ...base, x: p.x, y: p.y, stroke: o.stroke, sw: o.sw, ...txt };
     case 'textbox':
-      return { ...common, x: p.x, y: p.y, w: 0, h: 0, stroke, sw: Math.min(sw, 8), fill: P.fill.value, ...txt };
+      return { ...base, x: p.x, y: p.y, w: 0, h: 0, stroke: o.stroke, sw: o.sw, fill: filled, ...txt };
     case 'balloon':
-      return { ...common, x: p.x, y: p.y, w: 0, h: 0, tx: p.x, ty: p.y, stroke, sw: Math.min(sw, 8), fill: P.fill.value, ...txt };
+      return { ...base, x: p.x, y: p.y, w: 0, h: 0, tx: p.x, ty: p.y, stroke: o.stroke, sw: o.sw, fill: filled, ...txt };
     case 'highlight':
-      return { ...common, x: p.x, y: p.y, w: 0, h: 0, fill: P.fill.value };
+      return { ...base, x: p.x, y: p.y, w: 0, h: 0, fill: o.fill };
   }
 }
 
@@ -371,6 +533,7 @@ function moveBy(s, o, dx, dy) {
   for (const k of ['x', 'tx', 'x1', 'x2']) if (k in o) s[k] = o[k] + dx;
   for (const k of ['y', 'ty', 'y1', 'y2']) if (k in o) s[k] = o[k] + dy;
   if (o.pts) s.pts = o.pts.map((q) => [q[0] + dx, q[1] + dy]);
+  if (o.nodes) s.nodes = o.nodes.map((n) => ({ x: n.x + dx, y: n.y + dy, hx: n.hx + dx, hy: n.hy + dy }));
 }
 
 // ------------------------------------------------------------------ pointer interaction
@@ -385,6 +548,24 @@ svg.addEventListener('pointerdown', (e) => {
   commitEdit();
   const p = pt(e);
   const pre = snapshot();
+  if (state.tool === 'bezier') {
+    let s = state.bz;
+    if (!s) {
+      s = newShape('bezier', p);
+      state.shapes.push(s);
+      state.bz = s; state.bzPre = pre; state.sel = s.id;
+    } else {
+      const f = s.nodes[0];
+      if (s.nodes.length >= 3 && Math.hypot(p.x - f.x, p.y - f.y) * state.zoom < 10) { s.closed = true; finishBezier(); return; }
+    }
+    const node = { x: p.x, y: p.y, hx: p.x, hy: p.y };
+    s.nodes.push(node);
+    drag = { kind: 'bnode', s, node };
+    svg.setPointerCapture(e.pointerId);
+    render();
+    e.preventDefault();
+    return;
+  }
   if (state.tool === 'select') {
     const h = e.target.dataset && e.target.dataset.h;
     const hitEl = e.target.closest && e.target.closest('[data-id]');
@@ -413,9 +594,14 @@ svg.addEventListener('pointerdown', (e) => {
 svg.addEventListener('pointermove', (e) => {
   const p = pt(e);
   $('stPos').textContent = state.loaded ? `${Math.round(p.x)}, ${Math.round(p.y)}` : '';
-  if (!drag) return;
+  if (!drag) {
+    if (state.bz) { state.bzHover = p; renderUI(); }
+    return;
+  }
   const { s } = drag;
-  if (drag.kind === 'create') {
+  if (drag.kind === 'bnode') {
+    drag.node.hx = p.x; drag.node.hy = p.y;
+  } else if (drag.kind === 'create') {
     if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) * state.zoom > 3) drag.moved = true;
     switch (s.type) {
       case 'rect': case 'ellipse': setBox(s, drag.start, p, e.shiftKey); break;
@@ -435,7 +621,12 @@ svg.addEventListener('pointermove', (e) => {
     moveBy(s, drag.orig, dx, dy);
   } else if (drag.kind === 'resize') {
     const o = drag.orig, h = drag.handle;
-    if (h === 'p1') { const q = e.shiftKey ? snap45({ x: o.x2, y: o.y2 }, p) : p; s.x1 = q.x; s.y1 = q.y; }
+    if (s.type === 'bezier') {
+      const i = +h.slice(1), n = s.nodes[i], on = o.nodes[i];
+      if (h[0] === 'n') { n.x = p.x; n.y = p.y; n.hx = on.hx + (p.x - on.x); n.hy = on.hy + (p.y - on.y); }
+      else if (h[0] === 'h') { n.hx = p.x; n.hy = p.y; }
+      else { n.hx = 2 * n.x - p.x; n.hy = 2 * n.y - p.y; }
+    } else if (h === 'p1') { const q = e.shiftKey ? snap45({ x: o.x2, y: o.y2 }, p) : p; s.x1 = q.x; s.y1 = q.y; }
     else if (h === 'p2') { const q = e.shiftKey ? snap45({ x: o.x1, y: o.y1 }, p) : p; s.x2 = q.x; s.y2 = q.y; }
     else if (h === 'tail') { s.tx = p.x; s.ty = p.y; }
     else {
@@ -454,7 +645,9 @@ function endDrag() {
   if (!drag) return;
   const d = drag; drag = null;
   const s = d.s;
+  if (d.kind === 'bnode') { render(); return; }
   if (d.kind === 'create') {
+    if (s.type === 'pen') s.pts = smoothPts(s.pts);
     let keep = true;
     if (BOX.has(s.type)) {
       if (!d.moved && (s.type === 'textbox' || s.type === 'balloon')) {
@@ -478,6 +671,13 @@ function endDrag() {
 svg.addEventListener('pointerup', endDrag);
 svg.addEventListener('pointercancel', endDrag);
 svg.addEventListener('dblclick', (e) => {
+  const bz = state.bz;
+  if (bz) { // the double click's two clicks each added a node: drop the duplicate
+    const n = bz.nodes;
+    if (n.length > 2 && Math.hypot(n[n.length - 1].x - n[n.length - 2].x, n[n.length - 1].y - n[n.length - 2].y) * state.zoom < 6) n.pop();
+    finishBezier();
+    return;
+  }
   const el = e.target.closest && e.target.closest('[data-id]');
   const s = el && byId(+el.dataset.id);
   if (s && TEXTY.has(s.type) && state.tool === 'select') startEdit(s, snapshot(), false);
@@ -492,6 +692,9 @@ function positionEditor(s) {
   ta.style.fontSize = s.size * z + 'px';
   ta.style.fontWeight = s.bold ? 'bold' : 'normal';
   ta.style.color = s.tc;
+  const outlined = s.type === 'text' && s.sw > 0;
+  ta.style.webkitTextStroke = outlined ? `${s.sw * 2 * z}px ${s.stroke}` : '0';
+  ta.style.paintOrder = 'stroke fill';
   if (s.type === 'text') {
     ta.style.left = s.x * z + 'px'; ta.style.top = s.y * z + 'px';
     ta.style.width = Math.max(120, ta.scrollWidth + 4) + 'px';
@@ -647,7 +850,7 @@ stage.addEventListener('wheel', (e) => {
 }, { passive: false });
 addEventListener('resize', () => { if (state.loaded && state.zoom <= 1) fit(); });
 
-const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', p: 'pen', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight' };
+const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight' };
 addEventListener('keydown', (e) => {
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -668,6 +871,12 @@ addEventListener('keydown', (e) => {
     else return;
     e.preventDefault();
     return;
+  }
+  if (state.bz && (k === 'enter' || k === 'escape')) { finishBezier(); e.preventDefault(); return; }
+  if (state.bz && k === 'backspace') {
+    state.bz.nodes.pop();
+    if (!state.bz.nodes.length) { state.shapes = state.shapes.filter((x) => x !== state.bz); state.bz = null; }
+    render(); e.preventDefault(); return;
   }
   if (k === 'delete' || k === 'backspace') { deleteSel(); e.preventDefault(); }
   else if (k === 'escape') { state.sel = null; setTool('select'); render(); }

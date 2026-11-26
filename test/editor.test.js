@@ -52,11 +52,19 @@ const SHOT = process.env.SHOT; // optional screenshot path
   await drag('a', [620, 160], [780, 240]);
   await drag('h', [90, 95], [300, 130]);
   // freehand
-  await page.keyboard.press('p');
+  await page.keyboard.press('f');
   const pts = [[450, 300], [480, 340], [520, 290], [560, 350], [600, 300]].map((p) => at(...p));
   await page.mouse.move(...pts[0]); await page.mouse.down();
   for (const p of pts.slice(1)) await page.mouse.move(...p, { steps: 4 });
   await page.mouse.up();
+
+  // bezier pen: corner, curve (drag), corner, then Enter
+  await page.keyboard.press('p');
+  const bz = [[100, 480], [200, 520], [300, 480]].map((q) => at(...q));
+  await page.mouse.click(...bz[0]);
+  await page.mouse.move(...bz[1]); await page.mouse.down(); await page.mouse.move(bz[1][0] + 40, bz[1][1] - 40, { steps: 4 }); await page.mouse.up();
+  await page.mouse.click(...bz[2]);
+  await page.keyboard.press('Enter');
 
   // text (click, type, ctrl+enter)
   await page.keyboard.press('t');
@@ -73,7 +81,26 @@ const SHOT = process.env.SHOT; // optional screenshot path
   await page.keyboard.type('Look here!');
   await page.keyboard.press('Control+Enter');
 
-  assert.deepStrictEqual(await types(), ['rect', 'ellipse', 'line', 'arrow', 'highlight', 'pen', 'text', 'textbox', 'balloon']);
+  assert.deepStrictEqual(await types(), ['rect', 'ellipse', 'line', 'arrow', 'highlight', 'pen', 'bezier', 'text', 'textbox', 'balloon']);
+
+  // per-tool defaults
+  const S = await page.evaluate(() => Object.fromEntries(window.__state.shapes.map((s) => [s.type, s])));
+  assert.deepStrictEqual([S.rect.stroke, S.rect.fill, S.ellipse.stroke, S.ellipse.fill], ['#ff0000', 'none', '#ff0000', 'none']);
+  assert.deepStrictEqual([S.text.tc, S.text.stroke], ['#ffffff', '#ff0000'], 'text: white fill, red outline');
+  assert.deepStrictEqual([S.textbox.fill, S.textbox.tc, S.balloon.fill, S.balloon.tc], ['#ff0000', '#ffffff', '#ff0000', '#ffffff']);
+  assert.strictEqual(S.highlight.fill, '#ffff00');
+  assert.strictEqual(S.bezier.nodes.length, 3);
+  assert.ok(S.pen.pts.length < 17 && S.pen.pts.length >= 3, 'freehand simplified/smoothed: ' + S.pen.pts.length);
+
+  // each tool remembers its own options
+  await page.keyboard.press('r');
+  await page.fill('#pWidth', '9');
+  await page.press('#pWidth', 'Tab');
+  await page.keyboard.press('e');
+  assert.strictEqual(await page.inputValue('#pWidth'), '4', 'ellipse keeps its own width');
+  await page.keyboard.press('r');
+  assert.strictEqual(await page.inputValue('#pWidth'), '9', 'rect remembered width');
+  await page.fill('#pWidth', '4'); await page.press('#pWidth', 'Tab');
 
   // select + move the rectangle
   await page.keyboard.press('v');
@@ -97,15 +124,15 @@ const SHOT = process.env.SHOT; // optional screenshot path
   await page.keyboard.press('Control+s');
   const svg = await page.evaluate(() => window.__saved);
   assert.ok(svg && svg.startsWith('<?xml'), 'svg saved');
-  for (const tag of ['<rect', '<ellipse', '<line', '<text', '<tspan', 'sharev-bg', 'sharev-data', 'mix-blend-mode']) {
+  for (const tag of ['<rect', '<ellipse', '<line', '<text', '<tspan', 'paint-order="stroke"', 'sharev-bg', 'sharev-data', 'mix-blend-mode']) {
     assert.ok(svg.includes(tag), 'svg contains ' + tag);
   }
   assert.ok(!svg.includes('class="hit"') && !svg.includes('data-id'), 'no editor-only helpers in saved svg');
-  assert.ok((svg.match(/<path/g) || []).length >= 3, 'arrow head, pen and balloon paths present');
+  assert.ok((svg.match(/<path/g) || []).length >= 4, 'arrow head, pen and balloon paths present');
 
   // reload the saved svg: shapes come back editable
   await page.evaluate((s) => window.__sharev.loadSvgText(s, 'x.svg'), svg);
-  assert.deepStrictEqual(await types(), ['rect', 'ellipse', 'line', 'arrow', 'highlight', 'pen', 'text', 'textbox', 'balloon']);
+  assert.deepStrictEqual(await types(), ['rect', 'ellipse', 'line', 'arrow', 'highlight', 'pen', 'bezier', 'text', 'textbox', 'balloon']);
   assert.strictEqual(await page.evaluate(() => window.__saved === window.__sharev.buildSvg()), true, 'save/load roundtrip is stable');
 
   // PNG rendering of the SVG works (annotations are painted)
