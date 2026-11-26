@@ -18,6 +18,11 @@
     <button data-cap="lastRegion" title="Capture last region (Ctrl+Shift+PrintScreen)">
       <svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><path d="M12 9v3l2 1.5"/></svg><span>Last</span></button>
   </div>
+  <div class="grp capopts">
+    <label title="Wait before capturing, so you can open a menu or tooltip first"><span class="lbl">&#9201;</span>
+      <select id="capDelay"><option value="0">no delay</option><option value="1">1 s</option><option value="2">2 s</option><option value="3">3 s</option><option value="4">4 s</option><option value="5">5 s</option></select></label>
+    <label class="chk" title="Keep ShareV's own windows visible so they can be included in the screenshot (for screenshots of ShareV itself)"><input type="checkbox" id="capSelf"> include ShareV</label>
+  </div>
   <div class="sep"></div>
   <div class="grp">
     <button id="bOpen" title="Open image or SVG (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>

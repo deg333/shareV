@@ -670,8 +670,13 @@ function persistOpts() {
   saveTimer = setTimeout(() => { if (window.api.saveUi) window.api.saveUi(settingsJson()).catch(() => {}); }, 400);
 }
 const FAV_KEY = 'sharev.favemoji';
-let favEmoji = [];
-try { favEmoji = (JSON.parse(localStorage.getItem(FAV_KEY) || '[]') || []).filter((x) => typeof x === 'string').slice(0, 200); } catch { /* ignore */ }
+// pinned by default: cross, check, smile, laughing, grimace, exploding head (used until the user changes their favourites)
+const DEFAULT_FAVS = ['b:u274c', 'b:u2714', 'b:u1f60a', 'b:u1f923', 'b:u1f62c', 'b:u1f92f'];
+let favEmoji = [...DEFAULT_FAVS];
+try {
+  const raw = localStorage.getItem(FAV_KEY);
+  if (raw !== null) favEmoji = (JSON.parse(raw) || []).filter((x) => typeof x === 'string').slice(0, 200);
+} catch { /* ignore */ }
 const settingsJson = () => JSON.stringify({ app: 'ShareV', version: 1, toolOpts, customColors, bakeFx: state.bakeFx, favEmoji }, null, 2);
 function applySettings(obj) {
   const src = (obj && obj.toolOpts) || {};
@@ -1582,6 +1587,16 @@ palette.addEventListener('click', (e) => {
   }
 });
 document.addEventListener('mousedown', (e) => { if (!palette.hidden && !palette.contains(e.target) && !e.target.closest('button.pal')) hidePalette(); });
+
+// ------------------------------------------------------------------ capture options (delay, include ShareV itself)
+const capDelay = $('capDelay'), capSelf = $('capSelf');
+if (window.api.getCaptureOpts) {
+  window.api.getCaptureOpts().then((o) => { capDelay.value = String(o.delay); capSelf.checked = !!o.self; }).catch(() => {});
+}
+const saveCapOpts = () => { if (window.api.setCaptureOpts) window.api.setCaptureOpts(+capDelay.value, capSelf.checked).catch(() => {}); };
+capDelay.addEventListener('change', () => { saveCapOpts(); capDelay.blur(); });
+capSelf.addEventListener('change', () => { saveCapOpts(); capSelf.blur(); });
+if (window.api.onTick) window.api.onTick((n) => { if (n > 0) flash(`Capturing in ${n}…`); });
 
 // ------------------------------------------------------------------ keyboard shortcut help
 const SHORTCUTS = [

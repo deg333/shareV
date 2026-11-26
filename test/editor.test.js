@@ -23,6 +23,7 @@ const SHOT = process.env.SHOT; // optional screenshot path
       openFile: async () => null, openFolder() {},
       ocr: async () => ({ language: 'English', lines: [{ text: 'Hello window', x: 90, y: 95, w: 210, h: 34 }, { text: 'second line', x: 90, y: 140, w: 150, h: 30 }] }), copyText: async (t) => { window.__copied = t; },
       emojiList: async () => [], emojiSave: async (n) => { window.__emojiSaved = n; return n.endsWith('.svg') ? n : n + '.svg'; }, emojiDelete: async () => {}, emojiImport: async () => [{ file: 'my star.svg', svg: '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><script>alert(1)</script><path onclick="x()" d="M32 4l8 24h24l-20 15 8 24-20-15-20 15 8-24L0 28h24z" fill="gold"/></svg>' }],
+      getCaptureOpts: async () => ({ delay: 0, self: false }), setCaptureOpts: async (d, s) => { window.__cap = [d, s]; },
       loadUi: async () => null, saveUi: async (j) => { window.__ui = j; }, exportUi: async (j) => { window.__export = j; return 'x.json'; }, importUi: async () => window.__import || null,
     };
   });
@@ -311,22 +312,26 @@ const SHOT = process.env.SHOT; // optional screenshot path
   // favourites: pinned to the top, saved in the settings
   await page.click('#pEmoji');
   await page.fill('#emojiSearch', '');
-  const fv = await page.locator('#emojiGrid .em[data-id^="b:"]').evaluateAll((els) => els.slice(5, 8).map((e) => e.dataset.id));
+  const defaults = ['b:u274c', 'b:u2714', 'b:u1f60a', 'b:u1f923', 'b:u1f62c', 'b:u1f92f'];
+  const n0 = await page.locator('#emojiGrid .em.isfav').count();
+  assert.strictEqual(n0 / 2, 6, 'six default favourites');
+  assert.deepStrictEqual(await page.locator('#emojiGrid .em').evaluateAll((els) => els.slice(0, 6).map((e) => e.dataset.id)), defaults, 'default favourites pinned first');
+  const fv = await page.locator('#emojiGrid .em[data-id^="b:"]:not(.isfav)').evaluateAll((els) => els.slice(5, 8).map((e) => e.dataset.id));
   await page.locator(`#emojiGrid .em[data-id="${fv[0]}"]`).first().hover();
   await page.locator(`#emojiGrid .em[data-id="${fv[0]}"] .fav`).first().click();
   await page.locator(`#emojiGrid .em[data-id="${fv[1]}"]`).first().click({ button: 'right' });
   assert.strictEqual(await page.locator('#emojiGrid h4').first().innerText().then((s) => s.replace('\u2605', '').trim().toLowerCase()), 'favourites', 'favourites listed first');
-  const favIds = await page.locator('#emojiGrid .em').evaluateAll((els) => els.slice(0, 2).map((e) => e.dataset.id));
-  assert.deepStrictEqual(favIds, [fv[0], fv[1]], 'pinned in the order they were added');
+  const favIds = await page.locator('#emojiGrid .em').evaluateAll((els) => els.slice(6, 8).map((e) => e.dataset.id));
+  assert.deepStrictEqual(favIds, [fv[0], fv[1]], 'pinned after the defaults, in the order they were added');
   await page.waitForTimeout(600);
-  assert.deepStrictEqual(JSON.parse(await page.evaluate(() => window.__ui)).favEmoji, [fv[0], fv[1]], 'favourites saved in settings');
+  assert.deepStrictEqual(JSON.parse(await page.evaluate(() => window.__ui)).favEmoji, [...defaults, fv[0], fv[1]], 'favourites saved in settings');
   await page.fill('#emojiSearch', 'zzzz-no-match');
   assert.strictEqual(await page.locator('#emojiGrid .em').count(), 0, 'search also filters favourites');
   await page.fill('#emojiSearch', '');
   await page.locator(`#emojiGrid .em[data-id="${fv[0]}"]`).first().hover();
   await page.locator(`#emojiGrid .em[data-id="${fv[0]}"] .fav`).first().click(); // unpin
-  assert.strictEqual(await page.locator('#emojiGrid .em.isfav').count(), 2, 'one favourite left (shown in Favourites and in its own group)');
-  assert.strictEqual(await page.locator('#emojiGrid .em').first().getAttribute('data-id'), fv[1]);
+  assert.strictEqual((await page.locator('#emojiGrid .em.isfav').count()) / 2, 7, 'one extra favourite left');
+  assert.strictEqual(await page.locator('#emojiGrid .em').nth(6).getAttribute('data-id'), fv[1]);
   // an imported settings file brings its favourites
   await page.evaluate((id) => { window.__import = JSON.stringify({ toolOpts: {}, favEmoji: [id] }); }, fv[2]);
   await page.keyboard.press('Escape');
@@ -335,6 +340,13 @@ const SHOT = process.env.SHOT; // optional screenshot path
   assert.strictEqual(await page.locator('#emojiGrid .em').first().getAttribute('data-id'), fv[2], 'imported favourite pinned');
   await page.keyboard.press('Escape');
   await page.mouse.click(5, 400);
+
+  // capture options: delay and include ShareV itself
+  await page.selectOption('#capDelay', '3');
+  assert.deepStrictEqual(await page.evaluate(() => window.__cap), [3, false]);
+  await page.check('#capSelf');
+  assert.deepStrictEqual(await page.evaluate(() => window.__cap), [3, true]);
+  await page.selectOption('#capDelay', '0'); await page.uncheck('#capSelf');
 
   // OCR sidebar: recognise, list, copy, place as SVG text
   await page.click('#bOcr');

@@ -91,3 +91,9 @@ your own `.svg` files. Imported/downloaded SVGs are sanitised (scripts, handlers
 
 **Favourite emoji**: hover an emoji in the picker and click its ☆ (or right-click it) to pin it. Favourites are listed first
 in the picker, are saved with your other settings in `ShareV-Data/ui-settings.json` (and included in Settings > Export/Import).
+
+**Capture delay & capturing ShareV itself**: next to the capture buttons, pick a delay (1–5 s) to wait before the
+screenshot is taken (time to open a menu or tooltip), and tick "include ShareV" to keep ShareV's own windows visible so
+the region / full-screen / window capture can include them. Both settings apply to the hotkeys too and are stored in
+`ShareV-Data/settings.json` (`captureDelay`, `captureSelf`). The emoji favourites default to ❌ ✔ 😊 🤣 😬 🤯 until you
+change them.

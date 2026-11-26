@@ -65,6 +65,10 @@ struct Settings {
     save_dir: Option<String>,
     copy_to_clipboard: bool,
     last_region: Option<LastRegion>,
+    /// seconds to wait before a capture is taken (0-5)
+    capture_delay: u32,
+    /// keep ShareV's own windows visible so they can be captured too
+    capture_self: bool,
 }
 
 struct Editor {
@@ -192,9 +196,9 @@ fn shot_by_origin(mx: i32, my: i32) -> Result<Shot, String> {
     Ok(Shot { img, mx: mon.x().unwrap_or(0), my: mon.y().unwrap_or(0) })
 }
 
-fn active_window_image() -> Option<RgbaImage> {
+fn active_window_image(include_self: bool) -> Option<RgbaImage> {
     let wins = xcap::Window::all().ok()?;
-    let me = std::process::id();
+    let me = if include_self { 0 } else { std::process::id() };
     let usable = |w: &xcap::Window| {
         !w.is_minimized().unwrap_or(true) && w.width().unwrap_or(0) > 40 && w.height().unwrap_or(0) > 40
     };
@@ -219,7 +223,8 @@ async fn capture_inner(app: &AppHandle, mode: &str) -> Result<Option<RgbaImage>,
     match mode {
         "full" => Ok(Some(blocking(move || shot_at_point(point)).await??.img)),
         "window" => {
-            if let Some(img) = blocking(active_window_image).await? {
+            let include_self = shared(app).settings.lock().unwrap().capture_self;
+            if let Some(img) = blocking(move || active_window_image(include_self)).await? {
                 return Ok(Some(img));
             }
             Ok(Some(blocking(move || shot_at_point(point)).await??.img))
@@ -284,15 +289,25 @@ async fn do_capture(app: AppHandle, mode: String) {
     if shared(&app).busy.swap(true, Ordering::SeqCst) {
         return;
     }
-    let hidden: Vec<WebviewWindow> = app
-        .webview_windows()
-        .into_values()
-        .filter(|w| w.is_visible().unwrap_or(false))
-        .collect();
+    let (delay, keep_self) = {
+        let s = shared(&app).settings.lock().unwrap().clone();
+        (s.capture_delay.min(5), s.capture_self)
+    };
+    // ShareV's own windows get out of the way unless the user wants to capture them
+    let hidden: Vec<WebviewWindow> = if keep_self {
+        Vec::new()
+    } else {
+        app.webview_windows().into_values().filter(|w| w.is_visible().unwrap_or(false)).collect()
+    };
     for w in &hidden {
         let _ = w.hide();
     }
-    tokio::time::sleep(Duration::from_millis(350)).await;
+    tokio::time::sleep(Duration::from_millis(if keep_self { 80 } else { 350 })).await;
+    for left in (1..=delay).rev() {
+        let _ = app.emit("capture-tick", left);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    let _ = app.emit("capture-tick", 0);
     let result = capture_inner(&app, &mode).await;
     for w in &hidden {
         let _ = w.show();
@@ -655,6 +670,29 @@ async fn emoji_import(app: AppHandle) -> Result<Vec<EmojiFile>, String> {
     Ok(out)
 }
 
+#[derive(Serialize)]
+struct CaptureOpts {
+    delay: u32,
+    #[serde(rename = "self")]
+    self_: bool,
+}
+
+#[tauri::command]
+async fn get_capture_opts(app: AppHandle) -> CaptureOpts {
+    let s = shared(&app).settings.lock().unwrap().clone();
+    CaptureOpts { delay: s.capture_delay.min(5), self_: s.capture_self }
+}
+
+#[tauri::command]
+async fn set_capture_opts(app: AppHandle, delay: u32, include_self: bool) {
+    {
+        let mut s = shared(&app).settings.lock().unwrap();
+        s.capture_delay = delay.min(5);
+        s.capture_self = include_self;
+    }
+    save_settings(&shared(&app));
+}
+
 #[tauri::command]
 async fn ui_load(app: AppHandle) -> Option<String> {
     fs::read_to_string(shared(&app).data_dir.join("ui-settings.json")).ok()
@@ -933,7 +971,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             capture, editor_init, editor_state, editor_title, save_svg, export_png, copy_png, open_file,
-            open_folder, overlay_init, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text, emoji_list, emoji_save, emoji_delete, emoji_import
+            open_folder, overlay_init, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text, get_capture_opts, set_capture_opts, emoji_list, emoji_save, emoji_delete, emoji_import
         ])
         .setup(|app| {
             let data_dir = resolve_data_dir(app);
