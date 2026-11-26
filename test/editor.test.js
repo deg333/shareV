@@ -25,6 +25,7 @@ const SHOT = process.env.SHOT; // optional screenshot path
       emojiList: async () => [], emojiSave: async (n) => { window.__emojiSaved = n; return n.endsWith('.svg') ? n : n + '.svg'; }, emojiDelete: async () => {}, emojiImport: async () => [{ file: 'my star.svg', svg: '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><script>alert(1)</script><path onclick="x()" d="M32 4l8 24h24l-20 15 8 24-20-15-20 15 8-24L0 28h24z" fill="gold"/></svg>' }],
       getHotkeys: async () => ({ fullscreen: 'CommandOrControl+PrintScreen', region: 'PrintScreen', window: 'Alt+PrintScreen', lastRegion: 'CommandOrControl+Shift+PrintScreen' }),
       capture: (m) => { (window.__caps = window.__caps || []).push(m); },
+      saveFile: async (name, ext, filter, text) => { window.__svgExport = { name, ext, text }; return '/tmp/' + name; },
       getCaptureOpts: async () => ({ delay: 0, self: false }), setCaptureOpts: async (d, s) => { window.__cap = [d, s]; },
       loadUi: async () => null, saveUi: async (j) => { window.__ui = j; }, exportUi: async (j) => { window.__export = j; return 'x.json'; }, importUi: async () => window.__import || null,
     };
@@ -486,8 +487,17 @@ const SHOT = process.env.SHOT; // optional screenshot path
   assert.deepStrictEqual(rd.slice(0, 2), ['18.0°', '5.91°'], 'theta2 and phi match the reference simulator');
   assert.ok(Math.abs(parseFloat(rd[2]) - 157.41) < 0.02 && Math.abs(parseFloat(rd[3]) - -34.1) < 0.1 && Math.abs(parseFloat(rd[4]) - -215) < 0.3, 'x, v, a at 18 deg, 20 rpm');
   assert.deepStrictEqual(rd.slice(5), ['80.0', '3.00', '1.000'], 'stroke, N = l/r, time ratio');
-  assert.ok((await page.locator('#mathBody').innerText()).includes('5.912°'), 'the maths shows the working');
-  assert.ok((await page.locator('#mathBody').innerText()).includes('157.4'), 'x worked through');
+  const mathText = async () => (await page.locator('#mathBody .katex-html').allTextContents()).join(' ');
+  assert.ok((await page.locator('#mathBody .katex').count()) > 20, 'equations are typeset with KaTeX');
+  assert.ok((await mathText()).includes('5.912'), 'the maths shows the working');
+  assert.ok((await mathText()).includes('157.4'), 'x worked through');
+  const colours = await page.locator('#mathBody .katex [style*="color"]').evaluateAll((els) => [...new Set(els.map((e) => e.style.color))]);
+  assert.ok(colours.length >= 4, 'variables are colour-coded by link: ' + colours.join(' '));
+  await page.click('.mtabs [data-mt="theory"]');
+  assert.ok((await page.locator('#theoryBody').innerText()).includes('Grübler'), 'theory tab');
+  await page.click('.mtabs [data-mt="pros"]');
+  assert.ok((await page.locator('#prosBody').innerText()).includes('Advantages') && (await page.locator('#prosBody').innerText()).includes('Disadvantages'), 'pros and cons tab');
+  await page.click('.mtabs [data-mt="work"]');
   // run: the crank advances; Space pauses
   await page.keyboard.press(' ');
   await page.waitForTimeout(700);
@@ -500,6 +510,7 @@ const SHOT = process.env.SHOT; // optional screenshot path
   await page.click('#segInv [data-inv="3"]');
   assert.ok((await page.locator('#pillInv').innerText()).includes('link 3'));
   assert.ok((await page.locator('#mathBody').innerText()).includes('Newton'), 'inversion 3 explains the rod-relative drive');
+  assert.ok((await mathText()).includes('β'), 'inversion 3 introduces beta');
   await page.click('#presets [data-p="Offset Engine"]');
   assert.ok(parseFloat((await cards())[7]) > 1.05, 'offset gives a quick-return time ratio > 1');
   await page.click('#presets [data-p="Quick Return"]');
@@ -516,6 +527,38 @@ const SHOT = process.env.SHOT; // optional screenshot path
   assert.ok(lNow >= 100, 'rod lengthened with the crank: ' + lNow);
   // graphs
   for (const g of ['v', 'a', 'T', 'x']) { await page.click(`#segGraph [data-g="${g}"]`); assert.ok((await page.locator('#simGraph path').count()) >= 1, 'graph ' + g); }
+  // graph: the dot is a true circle at any window width, the graph keeps its height, and the dot moves smoothly while running
+  await page.setViewportSize({ width: 1500, height: 900 });
+  await page.waitForTimeout(300);
+  const dotBox = async () => page.locator('#gDot').boundingBox();
+  let d1 = await dotBox();
+  assert.ok(Math.abs(d1.width - d1.height) < 0.6 && d1.width > 8, 'dot is a circle: ' + d1.width + 'x' + d1.height);
+  const gh1 = (await page.locator('#simGraph').boundingBox()).height;
+  await page.setViewportSize({ width: 1900, height: 900 });
+  await page.waitForTimeout(200);
+  d1 = await dotBox();
+  assert.ok(Math.abs(d1.width - d1.height) < 0.6, 'still a circle when the window is wider');
+  assert.ok(Math.abs((await page.locator('#simGraph').boundingBox()).height - gh1) < 1, 'graph height does not grow with the window');
+  await page.click('#segGraph [data-g="x"]');
+  await page.keyboard.press(' ');
+  const xs = [];
+  for (let i = 0; i < 8; i++) { await page.waitForTimeout(40); xs.push(await page.evaluate(() => parseFloat(document.getElementById('gDot').getAttribute('cx')))); }
+  await page.keyboard.press(' ');
+  const raw = xs.slice(1).map((v, i) => v - xs[i]);
+  assert.ok(raw.filter((s) => s === 0).length <= 1, 'the dot moves on (almost) every sample, not in jerky ~11 fps steps: ' + raw.map((s) => s.toFixed(1)).join(','));
+  assert.ok(raw.every((s) => s >= 0) && Math.max(...raw) < 80, 'and always forward in modest steps');
+  // export: a standalone, valid, heavily commented SVG
+  await page.click('#btnExport');
+  await page.waitForFunction(() => window.__svgExport);
+  const exp = await page.evaluate(() => window.__svgExport);
+  assert.ok(/^<\?xml/.test(exp.text) && exp.name.endsWith('.svg') && exp.ext === 'svg', 'export name/type');
+  const comments = (exp.text.match(/<!--/g) || []).length;
+  assert.ok(comments >= 12, 'heavily commented: ' + comments + ' comments');
+  for (const needle of ['WHAT YOU ARE LOOKING AT', 'THE EQUATIONS', 'VALUES AT THIS INSTANT', 'HOW THE DRAWING IS BUILT', 'LINK 1 - FRAME', 'LINK 2 - CRANK', 'LINK 3 - CONNECTING ROD', 'LINK 4 - SLIDER BLOCK', 'id="link-2-crank"', 'sin(phi) = (r sin(theta) - e) / l']) assert.ok(exp.text.includes(needle), 'export contains ' + needle);
+  const parsed = await page.evaluate((t) => { const d = new DOMParser().parseFromString(t, 'image/svg+xml'); return { err: !!d.querySelector('parsererror'), ids: [...d.querySelectorAll('g[id]')].map((g) => g.id) }; }, exp.text);
+  assert.strictEqual(parsed.err, false, 'exported svg is well-formed XML');
+  assert.ok(parsed.ids.includes('link-1-frame') && parsed.ids.includes('pins'), 'named groups: ' + parsed.ids.join(','));
+  await page.setViewportSize({ width: 1280, height: 800 });
   await page.click('#btnShow');
   assert.ok(await page.locator('#graphCard').isHidden());
   await page.click('#btnShow');

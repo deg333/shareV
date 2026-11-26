@@ -413,9 +413,21 @@ fn build_editor(app: &AppHandle, payload: Option<String>, visible: bool) {
     let sh = shared(app);
     let label = format!("editor-{}", sh.counter.fetch_add(1, Ordering::SeqCst));
     sh.editors.lock().unwrap().insert(label.clone(), Editor { empty: payload.is_none(), payload, path: None });
+    // wide by default (so the toolbars and the simulator never need a horizontal scroll bar), but never bigger than the screen
+    let (ww, wh) = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| {
+            let s = m.scale_factor();
+            let sz = m.size();
+            ((1580.0f64).min(sz.width as f64 / s * 0.96), (980.0f64).min(sz.height as f64 / s * 0.92))
+        })
+        .unwrap_or((1580.0, 940.0));
     let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("editor/index.html".into()))
         .title("ShareV")
-        .inner_size(1280.0, 860.0)
+        .inner_size(ww, wh)
+        .center()
         .min_inner_size(760.0, 480.0)
         .visible(visible)
         .data_directory(sh.data_dir.join("webview"))
@@ -759,6 +771,26 @@ async fn set_capture_opts(app: AppHandle, delay: u32, include_self: bool) {
     save_settings(&shared(&app));
 }
 
+/// Generic "save this text as a file" (used by the simulator's SVG export).
+#[tauri::command]
+async fn save_text_file(app: AppHandle, default_name: String, ext: String, filter_name: String, content: String) -> Result<Option<String>, String> {
+    let dir = save_dir(&shared(&app));
+    let a = app.clone();
+    let ext2 = ext.clone();
+    let picked = blocking(move || {
+        a.dialog()
+            .file()
+            .add_filter(filter_name, &[ext2.as_str()])
+            .set_directory(dir)
+            .set_file_name(default_name)
+            .blocking_save_file()
+    })
+    .await?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 #[tauri::command]
 async fn ui_load(app: AppHandle) -> Option<String> {
     fs::read_to_string(shared(&app).data_dir.join("ui-settings.json")).ok()
@@ -1074,7 +1106,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             capture, editor_init, editor_state, editor_title, save_svg, export_png, copy_png, open_file,
-            open_folder, overlay_init, overlay_ready, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text, get_hotkeys, get_capture_opts, set_capture_opts, emoji_list, emoji_save, emoji_delete, emoji_import
+            open_folder, overlay_init, overlay_ready, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text, save_text_file, get_hotkeys, get_capture_opts, set_capture_opts, emoji_list, emoji_save, emoji_delete, emoji_import
         ])
         .setup(|app| {
             let data_dir = resolve_data_dir(app);

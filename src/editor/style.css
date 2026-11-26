@@ -221,3 +221,51 @@ button.emojibtn img { width: 22px; height: 22px; display: block; }
 #sim .ms .note { color: #9fb1d4; font-size: 12.5px; line-height: 1.45; }
 @media (max-width: 1100px) { #sim .simcols { flex-direction: column; overflow: auto; } #sim .simmath { width: auto; } #sim .cards { grid-template-columns: repeat(4, 1fr); } #sim .sliders { grid-template-columns: 1fr; } }
 #sim svg .dc.e line { stroke: #2ea898; } #sim svg .tag.edim rect { fill: #14302c; stroke: #2ea898; } #sim svg .tag.edim text { fill: #8fe3d4; }
+
+/* ---- dark scroll bars everywhere, with a little air between the bar and the content next to it */
+* { scrollbar-width: auto; }
+::-webkit-scrollbar { width: 14px; height: 14px; background: transparent; }
+::-webkit-scrollbar-track { background: #0b111d; border-radius: 8px; margin: 2px; }
+::-webkit-scrollbar-thumb { background: #2c3850; border-radius: 8px; border: 3px solid #0b111d; }
+::-webkit-scrollbar-thumb:hover { background: #3d4d6c; }
+::-webkit-scrollbar-thumb:active { background: #4c5f86; }
+::-webkit-scrollbar-corner { background: #0b111d; }
+#sim .simmain, #sim .simmath, #sim .hist, #ocrLines, #emojiGrid, #calcSide .hist, #calcSide section { padding-right: 10px; }
+#sim .simmain { overflow-x: hidden; }
+#stage { scrollbar-gutter: stable; }
+
+/* ---- simulator layout: nothing may force a horizontal scroll bar, and the pictures keep a sensible height */
+#sim .simcols { min-width: 0; }
+#sim .simmain > * { min-width: 0; }
+#sim .stagecard svg { max-height: 50vh; }
+#sim .sliders { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#sim .cards { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+#sim .rd .rv { font-size: clamp(13px, 1.25vw, 17px); }
+#sim .row { min-width: 0; }
+#sim .graphcard { padding: 6px; height: auto; }
+#sim .graphcard svg { width: 100%; height: 176px; display: block; cursor: crosshair; }
+#sim .stagecard .toast { position: absolute; right: 16px; bottom: 14px; background: #14302c; border: 1px solid #2ea898; color: #cdf5ee; border-radius: 8px; padding: 6px 12px; font-size: 12.5px; max-width: 70%; word-break: break-all; }
+#sim .export { background: #1d3b6e; border: 1px solid #2f5ba8; color: #fff; font-weight: 600; margin-left: 4px; }
+
+/* ---- maths panel: tabs, KaTeX, legend, tables */
+#sim .simmath { padding: 0; display: flex; flex-direction: column; overflow: hidden; width: clamp(380px, 31vw, 560px); }
+#sim .mtabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid #1f2b45; }
+#sim .mtabs button { height: 30px; padding: 0 14px; border-radius: 8px 8px 0 0; color: #9fb1d4; border: 1px solid transparent; border-bottom: 0; }
+#sim .mtabs button.on { background: #162240; color: #fff; border-color: #28375a; }
+#sim .mpane { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 6px 14px 14px; scrollbar-gutter: stable; }
+#sim .mpane[hidden] { display: none; }
+#sim .msub { color: #7f8db0; font-size: 12px; margin-bottom: 6px; }
+#sim .legend { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+#sim .legend span { border: 1px solid var(--c); color: var(--c); border-radius: 999px; padding: 1px 9px; font-size: 11.5px; } #sim .legend b { font-weight: 700; }
+#sim .ms p, #sim .ms li { color: #b4c2de; font-size: 13px; line-height: 1.5; margin: 4px 0; } #sim .ms ul { margin: 4px 0; padding-left: 20px; }
+#sim .eqn { margin: 1px 0; overflow-x: auto; overflow-y: hidden; }
+#sim .eqn::-webkit-scrollbar { height: 8px; }
+#sim .katex { font-size: 1.02em; color: #e8eefb; }
+#sim .katex-display { margin: 3px 0; text-align: left; } #sim .katex-display > .katex { text-align: left; white-space: normal; }
+#sim .ms .note { color: #9fb1d4; font-size: 12.5px; line-height: 1.45; margin: 3px 0; }
+#sim table.inv { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 6px 0; }
+#sim table.inv th, #sim table.inv td { border: 1px solid #243455; padding: 5px 7px; text-align: left; vertical-align: top; color: #b4c2de; } #sim table.inv th { background: #162240; color: #dfe6f3; }
+#sim .pc { display: grid; gap: 10px; } #sim .pc section { border-radius: 10px; padding: 8px 10px; border: 1px solid; }
+#sim .pc .good { background: #10241f; border-color: #1f6f5a; } #sim .pc .bad { background: #2a1a1d; border-color: #7a3040; }
+#sim .pc h4, #sim .pch { margin: 0 0 4px; font-size: 13.5px; } #sim .pch { margin-top: 12px; }
+@media (max-width: 1100px) { #sim .simmath { width: auto; } }

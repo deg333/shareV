@@ -130,3 +130,10 @@ the quick-return time ratio. The **"The maths"** panel works every quantity thro
 `√((l±r)² − e²)`, `Q = (180°+α)/(180°−α)` and `T = (F − m·a)·dx/dθ`. Space runs/pauses, ← → step (Shift = 10°), click
 the graph to set θ₂. The maths is unit-tested against finite differences and the reference values
 (r = 40, l = 120, θ = 18°, 20 rpm → φ = 5.91°, x = 157.4 mm, v = −34.1 mm/s, a = −215 mm/s²).
+
+**Simulator upgrades**: equations are typeset with [KaTeX](https://katex.org) (bundled in `src/vendor/katex`, works offline) and colour-coded by link —
+crank (r, θ) teal, connecting rod (l, φ) purple, offset (e) grey, slider (x, v, a) gold, input ω orange, torque pink. The right-hand panel has three
+tabs: *The maths* (worked live), *Theory* (degrees of freedom, exact and approximate kinematics, forces and side thrust, inertia and balancing, offset and
+quick return, the four inversions, design rules) and *Pros & cons* (of the mechanism and of each inversion). **Export SVG** saves the current frame as a
+standalone, well-commented SVG (equations, inputs, values at that instant, the coordinate mapping and one named, explained `<g>` per layer).
+Windows open wide by default, scroll bars are dark with breathing room, and the graph dot is a fixed circle that moves smoothly every frame.

@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ipc: http://ipc.localhost https://raw.githubusercontent.com; img-src data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src ipc: http://ipc.localhost https://raw.githubusercontent.com; img-src data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'">
 <title>ShareV</title>
+<link rel="stylesheet" href="../vendor/katex/katex.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -166,6 +167,7 @@
 </div>
 <script src="../tauri-api.js"></script>
 <script src="../emoji/blob.js"></script>
+<script src="../vendor/katex/katex.min.js"></script>
 <script src="calc-core.js"></script>
 <script src="sim-core.js"></script>
 <script src="editor.js"></script>
