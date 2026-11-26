@@ -4114,6 +4114,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-global-shortcut",
  "tokio",
+ "windows 0.61.3",
  "xcap",
 ]
 

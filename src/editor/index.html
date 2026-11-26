@@ -50,20 +50,16 @@
   </div>
   <div class="sep"></div>
   <div class="grp props">
-    <label title="Line / border color">Line <input type="color" id="pStroke" value="#ff2d2d"></label>
-    <label title="Fill color (also highlight colour)">Fill <input type="color" id="pFill" value="#fff176"></label>
-    <label class="chk" title="Fill rectangles and ellipses"><input type="checkbox" id="pFillOn"> fill</label>
-    <label title="Text color">Text <input type="color" id="pText" value="#1a1a1a"></label>
-    <label title="Line width">Width <input type="number" id="pWidth" min="0" max="60" value="4"></label>
+    <label title="Line / border / outline colour">Line <input type="color" id="pStroke" value="#ff0000"><input type="range" id="pStrokeA" class="alpha" min="0" max="100" value="100" title="Line opacity"></label>
+    <label title="Fill colour (also the highlight colour)">Fill <input type="color" id="pFill" value="#ffff00"><input type="range" id="pFillA" class="alpha" min="0" max="100" value="100" title="Fill opacity"></label>
+    <label class="chk" title="Fill shape"><input type="checkbox" id="pFillOn"> fill</label>
+    <label title="Text colour">Text <input type="color" id="pText" value="#ffffff"><input type="range" id="pTextA" class="alpha" min="0" max="100" value="100" title="Text opacity"></label>
+    <label title="Line width (0 = none, where allowed)">Width <input type="number" id="pWidth" min="0" max="60" value="4"></label>
     <label title="Font size">Font <input type="number" id="pSize" min="6" max="200" value="28"></label>
     <label class="chk" title="Bold text"><input type="checkbox" id="pBold"> <b>B</b></label>
-  </div>
-  <div class="grow"></div>
-  <div class="grp">
-    <button id="bZoomOut" title="Zoom out (Ctrl+-)">−</button>
-    <button id="bZoomLbl" class="txt" title="Fit to window (Ctrl+0)">100%</button>
-    <button id="bZoomIn" title="Zoom in (Ctrl++)">+</button>
-    <button id="bZoom100" class="txt" title="Actual size (Ctrl+1)">1:1</button>
+    <label class="chk" title="Arrowhead at the start"><input type="checkbox" id="pHeadStart"> &#9664;start</label>
+    <label class="chk" title="Arrowhead at the end"><input type="checkbox" id="pHeadEnd"> end&#9654;</label>
+    <label title="Arrowhead size (px)">Head <input type="number" id="pHeadSize" min="4" max="200" value="20"></label>
   </div>
 </header>
 
@@ -83,7 +79,14 @@
     <textarea id="edit" spellcheck="false" hidden></textarea>
   </div>
 </main>
-<footer id="status"><span id="stInfo"></span><span id="stPos"></span></footer>
+<footer id="status"><span id="stInfo"></span><span class="grow"></span><span id="stPos"></span>
+<div class="grp">
+    <button id="bZoomOut" title="Zoom out (Ctrl+-)">−</button>
+    <button id="bZoomLbl" class="txt" title="Fit to window (Ctrl+0)">100%</button>
+    <button id="bZoomIn" title="Zoom in (Ctrl++)">+</button>
+    <button id="bZoom100" class="txt" title="Actual size (Ctrl+1)">1:1</button>
+  </div>
+</footer>
 <script src="../tauri-api.js"></script>
 <script src="editor.js"></script>
 </body>

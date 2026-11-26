@@ -36,8 +36,8 @@ const SHOT = process.env.SHOT; // optional screenshot path
   });
   await page.evaluate((d) => window.__sharev.loadImage(d, 'test'), bg);
 
-  const svgBox = await page.locator('#svg').boundingBox();
-  const zoom = await page.evaluate(() => window.__state.zoom);
+    const zoom = await page.evaluate(() => window.__state.zoom);
+  let svgBox = await page.locator('#svg').boundingBox();
   const at = (x, y) => [svgBox.x + x * zoom, svgBox.y + y * zoom];
   const drag = async (tool, a, b) => {
     await page.keyboard.press(tool);
@@ -60,6 +60,8 @@ const SHOT = process.env.SHOT; // optional screenshot path
 
   // bezier pen: corner, curve (drag), corner, then Enter
   await page.keyboard.press('p');
+  await page.check('#pHeadStart'); await page.check('#pHeadEnd'); await page.fill('#pHeadSize', '26');
+  await page.fill('#pStrokeA', '60');
   const bz = [[100, 480], [200, 520], [300, 480]].map((q) => at(...q));
   await page.mouse.click(...bz[0]);
   await page.mouse.move(...bz[1]); await page.mouse.down(); await page.mouse.move(bz[1][0] + 40, bz[1][1] - 40, { steps: 4 }); await page.mouse.up();
@@ -90,6 +92,9 @@ const SHOT = process.env.SHOT; // optional screenshot path
   assert.deepStrictEqual([S.textbox.fill, S.textbox.tc, S.balloon.fill, S.balloon.tc], ['#ff0000', '#ffffff', '#ff0000', '#ffffff']);
   assert.strictEqual(S.highlight.fill, '#ffff00');
   assert.strictEqual(S.bezier.nodes.length, 3);
+  assert.deepStrictEqual([S.bezier.hs, S.bezier.he, S.bezier.hz, S.bezier.sa], [true, true, 26, 0.6], 'bezier arrowheads + opacity');
+  assert.deepStrictEqual([S.arrow.he, S.arrow.hs, S.line.he], [true, false, false], 'arrow head at end only by default');
+  assert.strictEqual(S.highlight.fa, 0.5);
   assert.ok(S.pen.pts.length < 17 && S.pen.pts.length >= 3, 'freehand simplified/smoothed: ' + S.pen.pts.length);
 
   // each tool remembers its own options
@@ -100,9 +105,10 @@ const SHOT = process.env.SHOT; // optional screenshot path
   assert.strictEqual(await page.inputValue('#pWidth'), '4', 'ellipse keeps its own width');
   await page.keyboard.press('r');
   assert.strictEqual(await page.inputValue('#pWidth'), '9', 'rect remembered width');
-  await page.fill('#pWidth', '4'); await page.press('#pWidth', 'Tab');
+  await page.fill('#pWidth', '4'); await page.press('#pWidth', 'Enter');
 
-  // select + move the rectangle
+  // select + move the rectangle (toolbar height may change with the tool, so re-measure)
+  svgBox = await page.locator('#svg').boundingBox();
   await page.keyboard.press('v');
   await page.mouse.click(...at(450, 70)); // left edge of rect (stroke)
   const before = await page.evaluate(() => ({ ...window.__state.shapes[0] }));

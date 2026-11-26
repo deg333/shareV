@@ -556,6 +556,113 @@ fn build_tray(app: &tauri::App, hk: &Hotkeys) -> tauri::Result<()> {
     Ok(())
 }
 
+
+// ------------------------------------------------------------------ Windows: PrintScreen via a low-level keyboard hook
+// RegisterHotKey (what the global-shortcut plugin uses) cannot reliably claim PrintScreen / Alt+PrintScreen:
+// Windows' Snipping Tool and shell own them. A WH_KEYBOARD_LL hook sees the key first and can swallow it.
+#[cfg(windows)]
+mod winhook {
+    use std::sync::OnceLock;
+    use tauri::AppHandle;
+    use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY,
+        VK_CONTROL, VK_MENU, VK_SHIFT, VK_SNAPSHOT,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage, KBDLLHOOKSTRUCT, MSG,
+        WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN,
+    };
+
+    pub struct Binding {
+        pub ctrl: bool,
+        pub alt: bool,
+        pub shift: bool,
+        pub mode: String,
+    }
+    static APP: OnceLock<AppHandle> = OnceLock::new();
+    static BINDINGS: OnceLock<Vec<Binding>> = OnceLock::new();
+
+    /// Parse e.g. "CommandOrControl+Shift+PrintScreen"; returns None unless the key is PrintScreen.
+    pub fn parse(acc: &str, mode: &str) -> Option<Binding> {
+        let mut b = Binding { ctrl: false, alt: false, shift: false, mode: mode.to_string() };
+        let mut is_ps = false;
+        for tok in acc.split('+') {
+            match tok.trim().to_ascii_lowercase().as_str() {
+                "ctrl" | "control" | "commandorcontrol" | "cmdorctrl" | "commandorctrl" | "cmd" | "command" => b.ctrl = true,
+                "alt" | "option" => b.alt = true,
+                "shift" => b.shift = true,
+                "printscreen" | "prtsc" | "prtscr" | "snapshot" => is_ps = true,
+                _ => return None,
+            }
+        }
+        is_ps.then_some(b)
+    }
+
+    unsafe fn tap_dummy_key() {
+        // A key between Alt-down and Alt-up stops Windows from treating it as a lone Alt tap (menu-bar focus).
+        let mk = |flags| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(0xFF), wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
+        };
+        let inputs = [mk(Default::default()), mk(KEYEVENTF_KEYUP)];
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+
+    unsafe extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code >= 0 {
+            let k = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
+            if k.vkCode == VK_SNAPSHOT.0 as u32 {
+                let held = |vk: VIRTUAL_KEY| (GetAsyncKeyState(vk.0 as i32) as u16) & 0x8000 != 0;
+                let (c, a, s) = (held(VK_CONTROL), held(VK_MENU), held(VK_SHIFT));
+                if let Some(b) = BINDINGS.get().and_then(|v| v.iter().find(|b| b.ctrl == c && b.alt == a && b.shift == s)) {
+                    let w = wparam.0 as u32;
+                    if w == WM_KEYDOWN || w == WM_SYSKEYDOWN {
+                        if b.alt {
+                            tap_dummy_key();
+                        }
+                        if let Some(app) = APP.get() {
+                            super::spawn_capture(app, &b.mode);
+                        }
+                    }
+                    return LRESULT(1); // swallow down and up so Snipping Tool / the shell never see it
+                }
+            }
+        }
+        CallNextHookEx(None, code, wparam, lparam)
+    }
+
+    pub fn install(app: AppHandle, bindings: Vec<Binding>) {
+        if bindings.is_empty() {
+            return;
+        }
+        let _ = APP.set(app);
+        let _ = BINDINGS.set(bindings);
+        std::thread::spawn(|| unsafe {
+            let hmod = GetModuleHandleW(None).ok().map(|h| HINSTANCE(h.0));
+            if let Err(e) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(proc), hmod, 0) {
+                if let Some(app) = APP.get() {
+                    super::log(&super::shared(app), &format!("keyboard hook failed: {e}"));
+                }
+                return;
+            }
+            let mut msg = MSG::default();
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        });
+    }
+}
+
+fn log(sh: &Shared, msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(sh.data_dir.join("log.txt")) {
+        let _ = writeln!(f, "{} {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), msg);
+    }
+}
+
 fn register_hotkeys(app: &AppHandle, hk: &Hotkeys) {
     let list = [
         (&hk.fullscreen, "full"),
@@ -563,8 +670,20 @@ fn register_hotkeys(app: &AppHandle, hk: &Hotkeys) {
         (&hk.window, "window"),
         (&hk.last_region, "lastRegion"),
     ];
+    // On Windows, PrintScreen combinations go through the low-level hook (see `winhook`).
+    #[cfg(windows)]
+    let hooked: Vec<winhook::Binding> = list.iter().filter_map(|(acc, mode)| winhook::parse(acc, mode)).collect();
+    #[cfg(windows)]
+    let hooked_modes: Vec<String> = hooked.iter().map(|b| b.mode.clone()).collect();
+    #[cfg(windows)]
+    winhook::install(app.clone(), hooked);
+
     for (acc, mode) in list {
         if acc.is_empty() {
+            continue;
+        }
+        #[cfg(windows)]
+        if hooked_modes.iter().any(|m| m == mode) {
             continue;
         }
         let mode = mode.to_string();
@@ -574,7 +693,7 @@ fn register_hotkeys(app: &AppHandle, hk: &Hotkeys) {
             }
         });
         if let Err(e) = res {
-            eprintln!("ShareV: could not register hotkey {acc}: {e}");
+            log(&shared(app), &format!("could not register hotkey {acc}: {e}"));
         }
     }
 }

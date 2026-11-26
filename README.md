@@ -11,7 +11,7 @@ Built with Electron; no installer, no registry, all data lives next to the execu
 | Region (drag a rectangle, `Esc`/right-click cancels) | `Ctrl+PrintScreen` |
 | Last region | `Ctrl+Shift+PrintScreen` |
 
-Also available from the tray icon and the editor toolbar. Hotkeys, save folder and
+Also available from the tray icon and the editor toolbar. On Windows the PrintScreen combinations use a low-level keyboard hook, so they work even though the shell/Snipping Tool normally owns that key (and are swallowed so it does not also open). Hotkeys, save folder and
 `copyToClipboard` are in `ShareV-Data/settings.json`.
 
 ## Annotation tools (all SVG)
@@ -50,3 +50,8 @@ npm test                 # headless editor tests (needs playwright)
 Each tool remembers its own colour / width / fill / font settings (stored in the app's local storage).
 Defaults: rectangle & ellipse red, no fill; text white with a red outline; text box & balloon red fill,
 white border and white text; highlight yellow (255,255,0).
+
+Line-like tools (line, arrow, freehand, pen) have optional arrowheads at the start and/or end and a head-size
+setting (arrow defaults to an end head). Every colour (line, fill, text) has its own opacity slider; highlight
+can have an outline (Width 0 = none) and defaults to 50 % yellow.
+Errors (e.g. a hotkey that could not be registered) are written to `ShareV-Data/log.txt`.

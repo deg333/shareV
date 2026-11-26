@@ -75,13 +75,14 @@ function bounds(s) {
 }
 
 // ------------------------------------------------------------------ SVG generation
+const opAttr = (name, v) => (v === undefined || v === null || v >= 1 ? '' : ` ${name}="${num(v)}"`);
 function textEls(s, x, y) {
   if (s._editing || !s.text) return '';
   const first = y + s.size * 0.95;
   const tsp = s._lines.map((l, i) => `<tspan x="${num(x)}" y="${num(first + i * lineH(s))}">${esc(l) || ' '}</tspan>`).join('');
   const outline = s.type === 'text' && s.sw > 0 && s.stroke && s.stroke !== 'none'
-    ? ` stroke="${s.stroke}" stroke-width="${s.sw * 2}" stroke-linejoin="round" paint-order="stroke"` : '';
-  return `<text font-family="${esc(FONT)}" font-size="${s.size}"${s.bold ? ' font-weight="bold"' : ''} fill="${s.tc}"${outline} xml:space="preserve">${tsp}</text>`;
+    ? ` stroke="${s.stroke}"${opAttr('stroke-opacity', s.sa)} stroke-width="${s.sw * 2}" stroke-linejoin="round" paint-order="stroke"` : '';
+  return `<text font-family="${esc(FONT)}" font-size="${s.size}"${s.bold ? ' font-weight="bold"' : ''} fill="${s.tc}"${opAttr('fill-opacity', s.ta)}${outline} xml:space="preserve">${tsp}</text>`;
 }
 
 function balloonPath(s) {
@@ -150,41 +151,115 @@ function bezierPath(s) {
   return d;
 }
 
-function arrowSvg(s, hit) {
-  const dx = s.x2 - s.x1, dy = s.y2 - s.y1, len = Math.hypot(dx, dy) || 1;
-  const ux = dx / len, uy = dy / len;
-  const L = Math.min(len, Math.max(14, s.sw * 4)), hw = L * 0.5;
-  const bx = s.x2 - ux * L, by = s.y2 - uy * L;
-  const ex = s.x2 - ux * L * 0.7, ey = s.y2 - uy * L * 0.7;
-  const head = `M${num(s.x2)} ${num(s.y2)}L${num(bx - uy * hw)} ${num(by + ux * hw)}L${num(bx + uy * hw)} ${num(by - ux * hw)}Z`;
-  return (hit ? `<line class="hit" x1="${s.x1}" y1="${s.y1}" x2="${s.x2}" y2="${s.y2}" stroke="transparent" stroke-width="${Math.max(s.sw, 14)}"/>` : '') +
-    `<line x1="${num(s.x1)}" y1="${num(s.y1)}" x2="${num(ex)}" y2="${num(ey)}" stroke="${s.stroke}" stroke-width="${s.sw}" stroke-linecap="round"/>` +
-    `<path d="${head}" fill="${s.stroke}" stroke="${s.stroke}" stroke-width="1" stroke-linejoin="round"/>`;
+// ---- line-like shapes (line, arrow, freehand, bezier pen) with optional arrowheads at either end
+const HEADY = new Set(['line', 'arrow', 'pen', 'bezier']);
+const headOn = (s, end) => (end ? (s.he ?? s.type === 'arrow') : !!s.hs);
+const headLen = (s) => s.hz || Math.max(14, s.sw * 4);
+const unit = (dx, dy) => { const l = Math.hypot(dx, dy); return l > 1e-6 ? [dx / l, dy / l] : null; };
+const neg = (u) => [-u[0], -u[1]];
+
+/** Tip positions and outward directions of both ends: {a:{x,y,u}, b:{x,y,u}} or null. */
+function lineEnds(s) {
+  if (s.type === 'line' || s.type === 'arrow') {
+    const u = unit(s.x2 - s.x1, s.y2 - s.y1);
+    return u && { a: { x: s.x1, y: s.y1, u: neg(u) }, b: { x: s.x2, y: s.y2, u } };
+  }
+  if (s.type === 'pen') {
+    const p = s.pts;
+    if (p.length < 2) return null;
+    const dir = (from, step) => { // direction against the first point >= 4px away, to ignore jitter
+      const tip = p[from];
+      for (let i = from + step; i >= 0 && i < p.length; i += step) {
+        if (Math.hypot(p[i][0] - tip[0], p[i][1] - tip[1]) >= 4 || i === 0 || i === p.length - 1) return unit(tip[0] - p[i][0], tip[1] - p[i][1]);
+      }
+      return null;
+    };
+    const ua = dir(0, 1), ub = dir(p.length - 1, -1);
+    return ua && ub && { a: { x: p[0][0], y: p[0][1], u: ua }, b: { x: p[p.length - 1][0], y: p[p.length - 1][1], u: ub } };
+  }
+  if (s.type === 'bezier' && s.nodes.length >= 2 && !s.closed) {
+    const n = s.nodes, f = n[0], f1 = n[1], l = n[n.length - 1], l0 = n[n.length - 2];
+    const ta = unit(f.hx - f.x, f.hy - f.y) || unit(2 * f1.x - f1.hx - f.x, 2 * f1.y - f1.hy - f.y) || unit(f1.x - f.x, f1.y - f.y);
+    const tb = unit(l.hx - l.x, l.hy - l.y) || unit(l.x - l0.hx, l.y - l0.hy) || unit(l.x - l0.x, l.y - l0.y);
+    return ta && tb && { a: { x: f.x, y: f.y, u: neg(ta) }, b: { x: l.x, y: l.y, u: tb } };
+  }
+  return null;
+}
+
+function trimPts(pts, T) { // shorten a polyline at its end by T
+  const out = pts.map((q) => q.slice());
+  while (T > 0 && out.length >= 2) {
+    const l = out[out.length - 1], q = out[out.length - 2];
+    const d = Math.hypot(l[0] - q[0], l[1] - q[1]);
+    if (d > T) { out[out.length - 1] = [l[0] + (q[0] - l[0]) * (T / d), l[1] + (q[1] - l[1]) * (T / d)]; break; }
+    T -= d;
+    if (out.length > 2) out.pop(); else break;
+  }
+  return out;
+}
+/** Geometry to stroke: the line pulled back from each arrowhead so a thick stroke can't poke past the tip. */
+function trimmedGeom(s, e) {
+  const L = headLen(s);
+  let Ts = headOn(s, false) ? L * 0.7 : 0, Te = headOn(s, true) ? L * 0.7 : 0;
+  if (!e || (!Ts && !Te)) return s;
+  if (s.type === 'line' || s.type === 'arrow') {
+    const len = Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
+    const k = Math.min(1, (len * 0.9) / (Ts + Te || 1));
+    Ts *= k; Te *= k;
+    return { ...s, x1: s.x1 - e.a.u[0] * Ts, y1: s.y1 - e.a.u[1] * Ts, x2: s.x2 - e.b.u[0] * Te, y2: s.y2 - e.b.u[1] * Te };
+  }
+  if (s.type === 'pen') {
+    let pts = s.pts;
+    if (Te) pts = trimPts(pts, Te);
+    if (Ts) pts = trimPts(pts.slice().reverse(), Ts).reverse();
+    return { ...s, pts };
+  }
+  const nodes = s.nodes.map((n) => ({ ...n }));
+  const mv = (n, dx, dy) => { n.x += dx; n.y += dy; n.hx += dx; n.hy += dy; };
+  if (Ts) mv(nodes[0], -e.a.u[0] * Ts, -e.a.u[1] * Ts);
+  if (Te) mv(nodes[nodes.length - 1], -e.b.u[0] * Te, -e.b.u[1] * Te);
+  return { ...s, nodes };
+}
+function headSvg(tip, L, color) {
+  const [ux, uy] = tip.u, hw = L * 0.5;
+  const bx = tip.x - ux * L, by = tip.y - uy * L;
+  return `<path d="M${num(tip.x)} ${num(tip.y)}L${num(bx - uy * hw)} ${num(by + ux * hw)}L${num(bx + uy * hw)} ${num(by - ux * hw)}Z" fill="${color}" stroke="${color}" stroke-width="1" stroke-linejoin="round"/>`;
+}
+function strokeShape(s, hit) {
+  const e = lineEnds(s);
+  const g = trimmedGeom(s, e);
+  const hw = Math.max(s.sw, 14);
+  const stk = `stroke="${s.stroke}" stroke-width="${s.sw}" stroke-linecap="round" stroke-linejoin="round"`;
+  let body, hitEl, under = '';
+  if (s.type === 'line' || s.type === 'arrow') {
+    hitEl = `<line class="hit" x1="${s.x1}" y1="${s.y1}" x2="${s.x2}" y2="${s.y2}" stroke="transparent" stroke-width="${hw}"/>`;
+    body = `<line x1="${num(g.x1)}" y1="${num(g.y1)}" x2="${num(g.x2)}" y2="${num(g.y2)}" ${stk}/>`;
+  } else {
+    const d = s.type === 'pen' ? penPath(g.pts) : bezierPath(g);
+    hitEl = `<path class="hit" d="${d}" fill="none" stroke="transparent" stroke-width="${hw}"/>`;
+    body = `<path d="${d}" fill="none" ${stk}/>`;
+    if (s.type === 'bezier' && s.closed && s.fill && s.fill !== 'none') {
+      under = `<path d="${d}" fill="${s.fill}"${opAttr('fill-opacity', s.fa)} stroke="none"/>`;
+    }
+  }
+  const L = headLen(s);
+  let heads = '';
+  if (e && headOn(s, false)) heads += headSvg(e.a, L, s.stroke);
+  if (e && headOn(s, true)) heads += headSvg(e.b, L, s.stroke);
+  const sa = s.sa ?? 1;
+  const inner = body + heads;
+  return (hit ? hitEl : '') + under + (sa < 1 ? `<g opacity="${num(sa)}">${inner}</g>` : inner);
 }
 
 function shapeInner(s, hit) {
-  const st = `stroke="${s.stroke}" stroke-width="${s.sw}" fill="${s.fill || 'none'}"`;
+  const st = `stroke="${s.stroke}"${opAttr('stroke-opacity', s.sa)} stroke-width="${s.sw}" fill="${s.fill || 'none'}"${opAttr('fill-opacity', s.fa)}`;
   switch (s.type) {
     case 'rect':
       return `<rect x="${num(s.x)}" y="${num(s.y)}" width="${num(s.w)}" height="${num(s.h)}" ${st} stroke-linejoin="round"/>`;
     case 'ellipse':
       return `<ellipse cx="${num(s.x + s.w / 2)}" cy="${num(s.y + s.h / 2)}" rx="${num(s.w / 2)}" ry="${num(s.h / 2)}" ${st}/>`;
-    case 'line':
-      return (hit ? `<line class="hit" x1="${s.x1}" y1="${s.y1}" x2="${s.x2}" y2="${s.y2}" stroke="transparent" stroke-width="${Math.max(s.sw, 14)}"/>` : '') +
-        `<line x1="${num(s.x1)}" y1="${num(s.y1)}" x2="${num(s.x2)}" y2="${num(s.y2)}" stroke="${s.stroke}" stroke-width="${s.sw}" stroke-linecap="round"/>`;
-    case 'arrow':
-      return arrowSvg(s, hit);
-    case 'pen': {
-      const d = penPath(s.pts);
-      return (hit ? `<path class="hit" d="${d}" fill="none" stroke="transparent" stroke-width="${Math.max(s.sw, 14)}"/>` : '') +
-        `<path d="${d}" fill="none" stroke="${s.stroke}" stroke-width="${s.sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
-    }
-    case 'bezier': {
-      const d = bezierPath(s);
-      const fill = s.closed && s.fill && s.fill !== 'none' ? s.fill : 'none';
-      return (hit ? `<path class="hit" d="${d}" fill="none" stroke="transparent" stroke-width="${Math.max(s.sw, 14)}"/>` : '') +
-        `<path d="${d}" fill="${fill}" stroke="${s.stroke}" stroke-width="${s.sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
-    }
+    case 'line': case 'arrow': case 'pen': case 'bezier':
+      return strokeShape(s, hit);
     case 'text': {
       layout(s);
       const t = textEls(s, s.x, s.y);
@@ -197,8 +272,11 @@ function shapeInner(s, hit) {
     case 'balloon':
       layout(s);
       return `<path d="${balloonPath(s)}" ${st} stroke-linejoin="round"/>` + textEls(s, s.x + PAD, s.y + PAD);
-    case 'highlight':
-      return `<rect x="${num(s.x)}" y="${num(s.y)}" width="${num(s.w)}" height="${num(s.h)}" fill="${s.fill}" fill-opacity="0.5" style="mix-blend-mode:multiply"/>`;
+    case 'highlight': {
+      const r = `x="${num(s.x)}" y="${num(s.y)}" width="${num(s.w)}" height="${num(s.h)}"`;
+      return `<rect ${r} fill="${s.fill}" fill-opacity="${num(s.fa ?? 0.5)}" style="mix-blend-mode:multiply"/>` +
+        (s.sw > 0 ? `<rect ${r} fill="none" stroke="${s.stroke || '#ff0000'}"${opAttr('stroke-opacity', s.sa)} stroke-width="${s.sw}" stroke-linejoin="round"/>` : '');
+    }
     default:
       return '';
   }
@@ -360,26 +438,27 @@ function updateButtons() {
 
 // ------------------------------------------------------------------ per-tool options
 const RED = '#ff0000', WHITE = '#ffffff', YELLOW = '#ffff00';
-const LINE_OPTS = { stroke: RED, sw: 4 };
+const ALPHA = { sa: 1, fa: 1, ta: 1 };
+const LINE_OPTS = { stroke: RED, sw: 4, hs: false, he: false, hz: 20 };
 const BOX_OPTS = { fill: RED, fillOn: true, stroke: WHITE, sw: 3, tc: WHITE, size: 24, bold: false };
 const DEFAULT_OPTS = {
   rect: { stroke: RED, sw: 4, fill: YELLOW, fillOn: false },
   ellipse: { stroke: RED, sw: 4, fill: YELLOW, fillOn: false },
   line: { ...LINE_OPTS },
-  arrow: { ...LINE_OPTS },
+  arrow: { ...LINE_OPTS, he: true },
   pen: { ...LINE_OPTS },
   bezier: { ...LINE_OPTS, fill: RED, fillOn: false },
   text: { tc: WHITE, stroke: RED, sw: 5, size: 28, bold: true }, // white text with a red outline
   textbox: { ...BOX_OPTS },
   balloon: { ...BOX_OPTS },
-  highlight: { fill: YELLOW },
+  highlight: { fill: YELLOW, fa: 0.5, stroke: RED, sw: 0 },
 };
 const OPTS_KEY = 'sharev.toolopts.v1';
 const toolOpts = (() => {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(OPTS_KEY) || '{}') || {}; } catch { /* storage unavailable */ }
   const o = {};
-  for (const k of Object.keys(DEFAULT_OPTS)) o[k] = { ...DEFAULT_OPTS[k], ...(saved[k] || {}) };
+  for (const k of Object.keys(DEFAULT_OPTS)) o[k] = { ...ALPHA, ...DEFAULT_OPTS[k], ...(saved[k] || {}) };
   return o;
 })();
 const persistOpts = () => { try { localStorage.setItem(OPTS_KEY, JSON.stringify(toolOpts)); } catch { /* ignore */ } };
@@ -387,14 +466,19 @@ const persistOpts = () => { try { localStorage.setItem(OPTS_KEY, JSON.stringify(
 const P = {
   stroke: $('pStroke'), fill: $('pFill'), fillOn: $('pFillOn'), text: $('pText'),
   width: $('pWidth'), size: $('pSize'), bold: $('pBold'),
+  strokeA: $('pStrokeA'), fillA: $('pFillA'), textA: $('pTextA'),
+  headStart: $('pHeadStart'), headEnd: $('pHeadEnd'), headSize: $('pHeadSize'),
 };
-const KEYMAP = { stroke: 'stroke', fill: 'fill', fillOn: 'fillOn', text: 'tc', width: 'sw', size: 'size', bold: 'bold' };
-const LINEY = ['stroke', 'width'];
+const KEYMAP = {
+  stroke: 'stroke', fill: 'fill', fillOn: 'fillOn', text: 'tc', width: 'sw', size: 'size', bold: 'bold',
+  strokeA: 'sa', fillA: 'fa', textA: 'ta', headStart: 'hs', headEnd: 'he', headSize: 'hz',
+};
+const LINEY = ['stroke', 'width', 'headStart', 'headEnd', 'headSize'];
 const BOXY = ['stroke', 'fill', 'fillOn', 'text', 'width', 'size', 'bold'];
 const RELEVANT = {
   rect: ['stroke', 'fill', 'fillOn', 'width'], ellipse: ['stroke', 'fill', 'fillOn', 'width'],
-  line: LINEY, arrow: LINEY, pen: LINEY, bezier: ['stroke', 'fill', 'fillOn', 'width'],
-  text: ['text', 'stroke', 'width', 'size', 'bold'], textbox: BOXY, balloon: BOXY, highlight: ['fill'],
+  line: LINEY, arrow: LINEY, pen: LINEY, bezier: [...LINEY, 'fill', 'fillOn'],
+  text: ['text', 'stroke', 'width', 'size', 'bold'], textbox: BOXY, balloon: BOXY, highlight: ['stroke', 'fill', 'width'],
 };
 const STROKE_LABEL = { text: 'Outline', textbox: 'Border', balloon: 'Border' };
 
@@ -408,7 +492,8 @@ function updateControls() {
   const type = ctxType();
   for (const k of Object.keys(P)) {
     const label = P[k].closest('label');
-    label.hidden = !!(type && RELEVANT[type] && !RELEVANT[type].includes(k));
+    const base = /A$/.test(k) && k !== 'fillOn' ? k.slice(0, -1) : k; // opacity sliders follow their colour
+    label.hidden = !type || !RELEVANT[type] || !RELEVANT[type].includes(base); // nothing selected: no options
   }
   const first = P.stroke.closest('label').firstChild;
   if (first && first.nodeType === 3) first.nodeValue = (STROKE_LABEL[type] || 'Line') + ' ';
@@ -423,6 +508,10 @@ function loadOpts(type) {
   if ('sw' in o) P.width.value = o.sw;
   if ('size' in o) P.size.value = o.size;
   if ('bold' in o) P.bold.checked = o.bold;
+  P.strokeA.value = Math.round((o.sa ?? 1) * 100);
+  P.fillA.value = Math.round((o.fa ?? 1) * 100);
+  P.textA.value = Math.round((o.ta ?? 1) * 100);
+  if ('hs' in o) { P.headStart.checked = o.hs; P.headEnd.checked = o.he; P.headSize.value = o.hz; }
 }
 function syncProps() {
   const s = byId(state.sel);
@@ -434,17 +523,25 @@ function syncProps() {
     if ('sw' in s) P.width.value = s.sw;
     if (s.size) P.size.value = s.size;
     if ('bold' in s) P.bold.checked = !!s.bold;
+    P.strokeA.value = Math.round((s.sa ?? 1) * 100);
+    P.fillA.value = Math.round((s.fa ?? (s.type === 'highlight' ? 0.5 : 1)) * 100);
+    P.textA.value = Math.round((s.ta ?? 1) * 100);
+    if (HEADY.has(s.type)) { P.headStart.checked = headOn(s, false); P.headEnd.checked = headOn(s, true); P.headSize.value = Math.round(headLen(s)); }
   }
   updateControls();
 }
 let propPre = null;
 function onProp(key) {
   return () => {
-    const v = P[key].type === 'checkbox' ? P[key].checked : P[key].value;
+    const el = P[key];
+    const v = el.type === 'checkbox' ? el.checked : el.value;
+    const isAlpha = /A$/.test(key) && key !== 'fillOn';
+    const store = isAlpha ? clamp((+v || 0) / 100, 0, 1) : ['width', 'size', 'headSize'].includes(key) ? +v || 0 : v;
+    if (isAlpha) el.title = el.title.replace(/ \d+%$/, '') + ` ${Math.round(store * 100)}%`;
     // remember the value for the tool (or the selected shape's tool) it belongs to
     const type = ctxType();
     if (type && toolOpts[type] && KEYMAP[key] in toolOpts[type]) {
-      toolOpts[type][KEYMAP[key]] = key === 'width' || key === 'size' ? +v || 0 : v;
+      toolOpts[type][KEYMAP[key]] = store;
       persistOpts();
     }
     const s = byId(state.sel);
@@ -455,14 +552,21 @@ function onProp(key) {
       case 'fill': if (s.type === 'highlight' || (s.fill && s.fill !== 'none')) s.fill = v; break;
       case 'fillOn': if (s.type !== 'highlight' && 'fill' in s) s.fill = v ? P.fill.value : 'none'; break;
       case 'text': if (TEXTY.has(s.type)) s.tc = v; break;
-      case 'width': if ('sw' in s) s.sw = clamp(+v || 0, s.type === 'text' ? 0 : 1, 60); break;
+      case 'width': if ('sw' in s) s.sw = clamp(+v || 0, s.type === 'text' || s.type === 'highlight' ? 0 : 1, 60); break;
       case 'size': if ('size' in s) s.size = clamp(+v || 12, 6, 200); break;
       case 'bold': if ('bold' in s) s.bold = v; break;
+      case 'strokeA': s.sa = store; break;
+      case 'fillA': s.fa = store; break;
+      case 'textA': s.ta = store; break;
+      case 'headStart': if (HEADY.has(s.type)) s.hs = v; break;
+      case 'headEnd': if (HEADY.has(s.type)) s.he = v; break;
+      case 'headSize': if (HEADY.has(s.type)) s.hz = clamp(+v || 20, 4, 200); break;
     }
     render();
   };
 }
 for (const k of Object.keys(P)) {
+  P[k].addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === 'Escape') P[k].blur(); });
   P[k].addEventListener('input', onProp(k));
   P[k].addEventListener('change', () => { onProp(k)(); if (propPre !== null) { pushUndo(propPre); propPre = null; } });
 }
@@ -496,18 +600,20 @@ function finishBezier() {
 
 function newShape(tool, p) {
   const o = toolOpts[tool];
-  const base = { id: state.nextId++, type: tool };
+  const alpha = { sa: o.sa, fa: o.fa, ta: o.ta };
+  const base = { id: state.nextId++, type: tool, ...alpha };
+  const heads = { hs: !!o.hs, he: !!o.he, hz: o.hz };
   const filled = o.fillOn ? o.fill : 'none';
   const txt = { text: '', size: o.size, bold: !!o.bold, tc: o.tc };
   switch (tool) {
     case 'rect': case 'ellipse':
       return { ...base, x: p.x, y: p.y, w: 0, h: 0, stroke: o.stroke, sw: o.sw, fill: filled };
     case 'line': case 'arrow':
-      return { ...base, x1: p.x, y1: p.y, x2: p.x, y2: p.y, stroke: o.stroke, sw: o.sw };
+      return { ...base, x1: p.x, y1: p.y, x2: p.x, y2: p.y, stroke: o.stroke, sw: o.sw, ...heads };
     case 'pen':
-      return { ...base, pts: [[p.x, p.y]], stroke: o.stroke, sw: o.sw };
+      return { ...base, pts: [[p.x, p.y]], stroke: o.stroke, sw: o.sw, ...heads };
     case 'bezier':
-      return { ...base, nodes: [], closed: false, stroke: o.stroke, sw: o.sw, fill: filled };
+      return { ...base, nodes: [], closed: false, stroke: o.stroke, sw: o.sw, fill: filled, ...heads };
     case 'text':
       return { ...base, x: p.x, y: p.y, stroke: o.stroke, sw: o.sw, ...txt };
     case 'textbox':
@@ -515,7 +621,7 @@ function newShape(tool, p) {
     case 'balloon':
       return { ...base, x: p.x, y: p.y, w: 0, h: 0, tx: p.x, ty: p.y, stroke: o.stroke, sw: o.sw, fill: filled, ...txt };
     case 'highlight':
-      return { ...base, x: p.x, y: p.y, w: 0, h: 0, fill: o.fill };
+      return { ...base, x: p.x, y: p.y, w: 0, h: 0, fill: o.fill, stroke: o.stroke, sw: o.sw };
   }
 }
 
@@ -545,6 +651,7 @@ const pt = (e) => {
 
 svg.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || !state.loaded) return;
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur(); // re-enable shortcuts
   commitEdit();
   const p = pt(e);
   const pre = snapshot();
@@ -853,7 +960,7 @@ addEventListener('resize', () => { if (state.loaded && state.zoom <= 1) fit(); }
 const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight' };
 addEventListener('keydown', (e) => {
   const tag = e.target.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if (tag === 'TEXTAREA' || (tag === 'INPUT' && ['number', 'text'].includes(e.target.type))) return; // typing; sliders/checkboxes keep shortcuts
   const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
   if (mod) {
     if (k === 'z') { e.shiftKey ? redo() : undo(); }

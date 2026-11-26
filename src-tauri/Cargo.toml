@@ -20,6 +20,9 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tokio = { version = "1", features = ["sync", "time"] }
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader"] }
+
 [profile.release]
 opt-level = "s"
 lto = true
