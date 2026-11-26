@@ -75,3 +75,9 @@ to a file, import them on another machine, or reset to the defaults.
 and sit under the annotations. By default they are burned into the saved image (Settings menu: "Burn blur / pixelate
 into saved image") so the original, unblurred pixels are *not* left inside the SVG — switch it off only if you want
 them editable after re-opening. **Shadow**: shapes, lines, text, balloons and steps have a drop-shadow checkbox and size.
+
+**OCR (text → SVG text)**: the OCR button (or the region tool `O`) recognises text with the Windows 10/11 built-in OCR
+engine (no download; uses your installed Windows languages) and lists it in a sidebar: edit a line, copy it, or place it
+as real, editable SVG text at its original position — optionally painting over the original pixels with the sampled
+background colour ("cover original text") and using the sampled text colour. Blur/pixelate are applied before
+recognising, so redacted text is never read.

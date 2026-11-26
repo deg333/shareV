@@ -62,3 +62,20 @@ button.pal:hover { border-color: var(--accent); }
 #menu .note { color: var(--dim); font-size: 11.5px; padding: 6px 8px 4px; border-top: 1px solid var(--line); margin-top: 4px; }
 #menu code { background: #3a3d44; padding: 0 4px; border-radius: 3px; }
 #opts { min-height: 42px; } #opts .props { flex-wrap: wrap; row-gap: 4px; }
+
+#body { flex: 1; display: flex; min-height: 0; }
+#body > #stage { flex: 1; min-width: 0; }
+#side { width: 330px; flex: none; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); min-height: 0; }
+#side .sidehead { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 4px 12px; }
+#side h2 { margin: 0; font-size: 14px; font-weight: 600; }
+#side .sidebtns { display: flex; gap: 6px; padding: 4px 10px; flex-wrap: wrap; }
+#side .sidebtns button { border-color: var(--line); height: 28px; }
+#side button.primary { background: #1f4a7a; border-color: var(--accent); }
+#ocrStatus { padding: 2px 12px 6px; color: var(--dim); font-size: 12px; }
+#ocrLines { flex: 1; overflow: auto; padding: 0 10px 8px; display: flex; flex-direction: column; gap: 6px; }
+#ocrLines .ln { display: flex; gap: 4px; align-items: flex-start; background: #232529; border: 1px solid var(--line); border-radius: 6px; padding: 4px; }
+#ocrLines .ln:hover { border-color: var(--accent); }
+#ocrLines textarea { flex: 1; min-width: 0; resize: none; background: transparent; color: var(--fg); border: 0; outline: 0; font: 13px/1.35 "Segoe UI", system-ui, sans-serif; overflow: hidden; padding: 2px 4px; }
+#ocrLines .ln button { height: 24px; min-width: 24px; padding: 0 4px; font-size: 12px; color: var(--dim); }
+#side .sidefoot { border-top: 1px solid var(--line); padding: 6px 0 8px; }
+#side .sidefoot label { display: flex; gap: 6px; padding: 2px 12px 4px; color: var(--fg); }

@@ -16,6 +16,8 @@
     copyPng: (dataUrl) => invoke('copy_png', { dataUrl }),
     openFile: () => invoke('open_file'),
     openFolder: () => invoke('open_folder'),
+    ocr: (dataUrl) => invoke('ocr', { dataUrl }),
+    copyText: (text) => invoke('copy_text', { text }),
     loadUi: () => invoke('ui_load'),
     saveUi: (json) => invoke('ui_save', { json }),
     exportUi: (json) => invoke('ui_export', { json }),

@@ -287,6 +287,8 @@ function shapeInner(s, hit) {
     }
     case 'blur': case 'pixelate':
       return fxInner(s);
+    case 'ocr':
+      return `<rect x="${num(s.x)}" y="${num(s.y)}" width="${num(s.w)}" height="${num(s.h)}" fill="rgba(255,176,32,.15)" stroke="#ffb020" stroke-width="2" stroke-dasharray="6 4"/>`;
     case 'highlight': {
       const r = `x="${num(s.x)}" y="${num(s.y)}" width="${num(s.w)}" height="${num(s.h)}"`;
       return `<rect ${r} fill="${s.fill}" fill-opacity="${num(s.fa ?? 0.5)}" style="mix-blend-mode:multiply"/>` +
@@ -344,15 +346,16 @@ function fxInner(s) {
   return url ? `<image ${r} preserveAspectRatio="none" xlink:href="${url}"/>` : `<rect ${r} fill="#888" fill-opacity=".3"/>`;
 }
 /** Screenshot with every blur/pixelate burned in (used when saving, so the original pixels are not left in the file). */
-function bakedBgUrl() {
+function bakedCanvas() {
   const bg = state.bgCanvas;
   const c = document.createElement('canvas');
   c.width = bg.width; c.height = bg.height;
   const g = c.getContext('2d');
   g.drawImage(bg, 0, 0);
   for (const s of state.shapes) if (FX.has(s.type)) { const f = fxCanvas(s); if (f) g.drawImage(f, Math.round(s.x), Math.round(s.y)); }
-  return c.toDataURL('image/png');
+  return c;
 }
+const bakedBgUrl = () => bakedCanvas().toDataURL('image/png');
 function buildBgCanvas(src) {
   const im = new Image();
   im.onload = () => {
@@ -567,6 +570,7 @@ const DEFAULT_OPTS = {
   textbox: { ...BOX_OPTS },
   balloon: { ...BOX_OPTS },
   highlight: { fill: YELLOW, fa: 0.5, stroke: RED, sw: 0 },
+  ocr: {},
   blur: { amt: 12 },
   pixelate: { amt: 12 },
   step: { fill: RED, tc: WHITE, size: 36, stroke: WHITE, sw: 0 }, // numbered red circle
@@ -621,7 +625,7 @@ const RELEVANT = {
   line: LINEY, arrow: LINEY, pen: LINEY, bezier: [...LINEY, 'fill', 'fillOn'],
   text: ['text', 'stroke', 'width', 'size', 'bold'], textbox: BOXY, balloon: BOXY, highlight: ['stroke', 'fill', 'width'],
   step: ['fill', 'text', 'stroke', 'width', 'size', 'num'],
-  blur: ['amount'], pixelate: ['amount'],
+  blur: ['amount'], pixelate: ['amount'], ocr: [],
 };
 for (const k of Object.keys(RELEVANT)) if (SHADOWY.has(k)) RELEVANT[k] = [...RELEVANT[k], 'shadow', 'shadowSize'];
 const AMOUNT_LABEL = { blur: 'Radius', pixelate: 'Block' };
@@ -805,6 +809,8 @@ function newShape0(tool, p) {
       return { ...base, x: p.x, y: p.y, w: 0, h: 0, fill: o.fill, stroke: o.stroke, sw: o.sw };
     case 'blur': case 'pixelate':
       return { ...base, x: p.x, y: p.y, w: 0, h: 0, amt: o.amt };
+    case 'ocr':
+      return { ...base, x: p.x, y: p.y, w: 0, h: 0 };
     case 'step': {
       const n = nextStep();
       state.stepOverride = null;
@@ -922,7 +928,7 @@ svg.addEventListener('pointermove', (e) => {
     switch (s.type) {
       case 'step': s.x = p.x; s.y = p.y; break;
       case 'rect': case 'ellipse': setBox(s, drag.start, p, e.shiftKey); break;
-      case 'highlight': case 'textbox': case 'balloon': case 'blur': case 'pixelate': setBox(s, drag.start, p, false); break;
+      case 'highlight': case 'textbox': case 'balloon': case 'blur': case 'pixelate': case 'ocr': setBox(s, drag.start, p, false); break;
       case 'line': case 'arrow': { const q = e.shiftKey ? snap45(drag.start, p) : p; s.x2 = q.x; s.y2 = q.y; break; }
       case 'pen': {
         const l = s.pts[s.pts.length - 1];
@@ -965,6 +971,12 @@ function endDrag() {
   if (d.kind === 'bnode') { render(); return; }
   if (d.kind === 'marquee') { state.marquee = null; syncProps(); render(); return; }
   if (d.kind === 'create') {
+    if (s.type === 'ocr') { // region picker only: nothing is stored
+      state.shapes = state.shapes.filter((x) => x !== s); state.sel = null;
+      setTool('select'); render();
+      if (s.w > 4 && s.h > 4) runOcr({ x: Math.round(s.x), y: Math.round(s.y), w: Math.round(s.w), h: Math.round(s.h) });
+      return;
+    }
     if (s.type === 'step') { // stays on the tool: every click drops the next number
       pushUndo(d.pre); state.sel = s.id; render(); refreshNum(); return;
     }
@@ -1153,6 +1165,117 @@ const openFile = () => guard(async () => {
   if (r.kind === 'svg') await loadSvgText(r.text, r.name); else await loadImage(r.dataURL, r.name);
 });
 
+// ------------------------------------------------------------------ OCR sidebar
+const side = $('side'), ocrLinesEl = $('ocrLines'), ocrStatus = $('ocrStatus');
+const ocrState = { lines: [], busy: false };
+function openSide(on = true) {
+  side.hidden = !on;
+  if (state.loaded) fit();
+}
+function showHl(box) {
+  $('hl').innerHTML = box
+    ? `<rect x="${box.x - 3}" y="${box.y - 3}" width="${box.w + 6}" height="${box.h + 6}" fill="rgba(255,176,32,.18)" stroke="#ffb020" stroke-width="${2 / state.zoom}" stroke-dasharray="${5 / state.zoom} ${3 / state.zoom}"/>` : '';
+}
+function renderSide() {
+  ocrLinesEl.innerHTML = ocrState.lines.map((l, i) =>
+    `<div class="ln" data-i="${i}"><textarea rows="1" spellcheck="false">${esc(l.text)}</textarea>` +
+    `<button data-a="copy" title="Copy this line">&#10064;</button><button data-a="place" title="Place this line as SVG text">T</button></div>`).join('');
+  ocrLinesEl.querySelectorAll('textarea').forEach((x) => { x.style.height = '0'; x.style.height = x.scrollHeight + 'px'; });
+}
+function copyText(text) {
+  return window.api.copyText ? window.api.copyText(text) : navigator.clipboard.writeText(text);
+}
+/** OCR the whole image (rect omitted) or a region. Blur/pixelate are burned in first, so redacted text is never read. */
+async function runOcr(rect) {
+  if (!state.loaded || ocrState.busy) return;
+  openSide();
+  if (!window.api.ocr) { ocrStatus.textContent = 'Text recognition is not available here.'; return; }
+  ocrState.busy = true;
+  ocrStatus.textContent = 'Recognising…';
+  try {
+    const full = bakedCanvas();
+    let canvas = full;
+    if (rect) {
+      canvas = document.createElement('canvas');
+      canvas.width = rect.w; canvas.height = rect.h;
+      canvas.getContext('2d').drawImage(full, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
+    }
+    const res = await window.api.ocr(canvas.toDataURL('image/png'));
+    const ox = rect ? rect.x : 0, oy = rect ? rect.y : 0;
+    ocrState.lines = res.lines.map((l) => ({ text: l.text, x: l.x + ox, y: l.y + oy, w: l.w, h: l.h }));
+    ocrStatus.textContent = ocrState.lines.length
+      ? `${ocrState.lines.length} line${ocrState.lines.length === 1 ? '' : 's'} recognised${res.language ? ' (' + res.language + ')' : ''}${rect ? ' in the region' : ''}.`
+      : 'No text found.';
+    renderSide();
+  } catch (err) {
+    ocrStatus.textContent = 'Error: ' + (err && err.message || err);
+  } finally { ocrState.busy = false; }
+}
+/** Median colour of a 3px ring around the box = background; mean of strongly-different pixels inside = text colour. */
+function analyzeBox(b) {
+  const bg = state.bgCanvas, g = bg.getContext('2d', { willReadFrequently: true });
+  const x0 = clamp(Math.floor(b.x) - 3, 0, bg.width - 1), y0 = clamp(Math.floor(b.y) - 3, 0, bg.height - 1);
+  const x1 = clamp(Math.ceil(b.x + b.w) + 3, 1, bg.width), y1 = clamp(Math.ceil(b.y + b.h) + 3, 1, bg.height);
+  const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+  const d = g.getImageData(x0, y0, w, h).data;
+  const ring = [[], [], []], inner = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    const edge = x < 3 || y < 3 || x >= w - 3 || y >= h - 3;
+    if (edge) { ring[0].push(d[i]); ring[1].push(d[i + 1]); ring[2].push(d[i + 2]); } else inner.push([d[i], d[i + 1], d[i + 2]]);
+  }
+  const med = (a) => { a.sort((p, q) => p - q); return a.length ? a[a.length >> 1] : 255; };
+  const bgc = [med(ring[0]), med(ring[1]), med(ring[2])];
+  const far = inner.filter((p) => Math.hypot(p[0] - bgc[0], p[1] - bgc[1], p[2] - bgc[2]) > 110);
+  const lum = 0.299 * bgc[0] + 0.587 * bgc[1] + 0.114 * bgc[2];
+  let fg = lum > 140 ? [0, 0, 0] : [255, 255, 255];
+  if (far.length > 4) fg = [0, 1, 2].map((k) => Math.round(far.reduce((s, p) => s + p[k], 0) / far.length));
+  const hex = (c) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('');
+  return { bg: hex(bgc), fg: hex(fg) };
+}
+function textShapeFor(l, cover) {
+  const { bg, fg } = analyzeBox(l);
+  let size = clamp(Math.round(l.h * 0.85), 8, 160);
+  const m = measure(l.text, size, false);
+  if (m > 0) size = clamp(Math.round(size * clamp(l.w / m, 0.65, 1.5)), 8, 160); // match the original line width
+  const base = { sa: 1, fa: 1, ta: 1, sh: false, shz: 4 };
+  const out = [];
+  if (cover) out.push({ id: state.nextId++, type: 'rect', x: l.x - 2, y: l.y - 2, w: l.w + 4, h: l.h + 4, stroke: bg, sw: 0, fill: bg, ...base });
+  out.push({ id: state.nextId++, type: 'text', x: l.x, y: l.y + (l.h - size * 1.25) / 2, text: l.text, size, bold: false, tc: fg, stroke: '#000000', sw: 0, ...base });
+  return out;
+}
+function placeLines(lines) {
+  if (!lines.length || !state.bgCanvas) return;
+  const pre = snapshot();
+  const cover = $('ocrCover').checked;
+  const made = lines.flatMap((l) => textShapeFor(l, cover));
+  state.shapes.push(...made);
+  state.sels = made.filter((s) => s.type === 'text').map((s) => s.id);
+  pushUndo(pre); render(); syncProps();
+  flash(`${lines.length} SVG text line${lines.length === 1 ? '' : 's'} placed`);
+}
+$('bOcr').onclick = () => { openSide(); runOcr(); };
+$('ocrAll').onclick = () => runOcr();
+$('ocrRegion').onclick = () => { if (state.loaded) setTool('ocr'); };
+$('sideClose').onclick = () => { openSide(false); showHl(null); };
+$('ocrCopy').onclick = () => guard(async () => { await copyText(ocrState.lines.map((l) => l.text).join('\n')); flash('Text copied'); });
+$('ocrPlace').onclick = () => placeLines(ocrState.lines);
+ocrLinesEl.addEventListener('input', (e) => {
+  const row = e.target.closest('.ln');
+  if (!row) return;
+  ocrState.lines[+row.dataset.i].text = e.target.value;
+  e.target.style.height = '0'; e.target.style.height = e.target.scrollHeight + 'px';
+});
+ocrLinesEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('button'), row = e.target.closest('.ln');
+  if (!btn || !row) return;
+  const l = ocrState.lines[+row.dataset.i];
+  if (btn.dataset.a === 'copy') guard(async () => { await copyText(l.text); flash('Line copied'); });
+  else placeLines([l]);
+});
+ocrLinesEl.addEventListener('mouseover', (e) => { const row = e.target.closest('.ln'); showHl(row ? ocrState.lines[+row.dataset.i] : null); });
+ocrLinesEl.addEventListener('mouseleave', () => showHl(null));
+
 // ------------------------------------------------------------------ colour presets
 const PRESETS = [
   ['black', '#000000'], ['gray', '#808080'], ['silver', '#c0c0c0'], ['white', '#ffffff'],
@@ -1205,7 +1328,7 @@ document.addEventListener('mousedown', (e) => { if (!palette.hidden && !palette.
 // ------------------------------------------------------------------ keyboard shortcut help
 const SHORTCUTS = [
   ['Tools', [['Select / move', 'V'], ['Rectangle', 'R'], ['Ellipse', 'E'], ['Line', 'L'], ['Arrow', 'A'], ['Pen (bezier curves)', 'P'], ['Freehand (smoothed)', 'F'],
-    ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H'], ['Blur region', 'U'], ['Pixelate region', 'X']]],
+    ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H'], ['Blur region', 'U'], ['Pixelate region', 'X'], ['Recognise text in region (OCR)', 'O']]],
   ['Selecting', [['Select several', 'Drag a box, or Shift/Ctrl + click'], ['Select all', 'Ctrl + A'], ['Deselect / back to Select', 'Esc'], ['Edit text of selected', 'Enter / double-click']]],
   ['Editing the selection', [['Nudge 1 px', '← ↑ → ↓'], ['Nudge 10 px', 'Shift + arrow keys'], ['Duplicate', 'Ctrl + D'], ['Bring to front', 'Ctrl + ]'],
     ['Send to back', 'Ctrl + ['], ['Delete', 'Del / Backspace'], ['Undo', 'Ctrl + Z'], ['Redo', 'Ctrl + Y / Ctrl + Shift + Z']]],
@@ -1264,7 +1387,7 @@ stage.addEventListener('wheel', (e) => {
 }, { passive: false });
 addEventListener('resize', () => { if (state.loaded && state.zoom <= 1) fit(); });
 
-const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight', n: 'step', u: 'blur', x: 'pixelate' };
+const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight', n: 'step', u: 'blur', x: 'pixelate', o: 'ocr' };
 addEventListener('keydown', (e) => {
   const tag = e.target.tagName;
   if (tag === 'TEXTAREA' || (tag === 'INPUT' && ['number', 'text'].includes(e.target.type))) return; // typing; sliders/checkboxes keep shortcuts

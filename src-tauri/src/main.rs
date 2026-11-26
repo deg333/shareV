@@ -481,6 +481,104 @@ async fn open_file(app: AppHandle, window: WebviewWindow) -> Result<Option<Value
     Ok(Some(json!({ "kind": "image", "dataURL": format!("data:{mime};base64,{}", B64.encode(bytes)), "name": name })))
 }
 
+// ------------------------------------------------------------------ OCR (Windows.Media.Ocr, built into Windows 10/11)
+#[derive(Serialize)]
+struct OcrLine {
+    text: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+#[derive(Serialize)]
+struct OcrOut {
+    lines: Vec<OcrLine>,
+    language: String,
+}
+
+#[cfg(windows)]
+fn ocr_impl(png: Vec<u8>) -> Result<OcrOut, String> {
+    use windows::{
+        Graphics::Imaging::{BitmapAlphaMode, BitmapDecoder, BitmapPixelFormat},
+        Media::Ocr::OcrEngine,
+        Storage::Streams::{DataWriter, InMemoryRandomAccessStream},
+        Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED},
+    };
+    let e = |x: windows::core::Error| x.to_string();
+    unsafe {
+        let _ = RoInitialize(RO_INIT_MULTITHREADED); // harmless if this thread is already initialised
+    }
+    let engine = OcrEngine::TryCreateFromUserProfileLanguages().map_err(|_| {
+        "No OCR language is installed. Add a language in Windows Settings > Time & language > Language & region.".to_string()
+    })?;
+    // the engine refuses very large images: scale down, then map coordinates back
+    let max = OcrEngine::MaxImageDimension().unwrap_or(2600) as f64;
+    let img = image::load_from_memory(&png).map_err(|x| x.to_string())?;
+    let scale = (max / img.width().max(img.height()) as f64).min(1.0);
+    let bytes = if scale < 1.0 {
+        let small = img.resize(
+            (img.width() as f64 * scale) as u32,
+            (img.height() as f64 * scale) as u32,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let mut buf = Cursor::new(Vec::new());
+        small.write_to(&mut buf, ImageFormat::Png).map_err(|x| x.to_string())?;
+        buf.into_inner()
+    } else {
+        png
+    };
+
+    let stream = InMemoryRandomAccessStream::new().map_err(e)?;
+    let writer = DataWriter::CreateDataWriter(&stream).map_err(e)?;
+    writer.WriteBytes(&bytes).map_err(e)?;
+    writer.StoreAsync().map_err(e)?.get().map_err(e)?;
+    writer.FlushAsync().map_err(e)?.get().map_err(e)?;
+    writer.DetachStream().map_err(e)?;
+    stream.Seek(0).map_err(e)?;
+    let decoder = BitmapDecoder::CreateAsync(&stream).map_err(e)?.get().map_err(e)?;
+    let bmp = decoder
+        .GetSoftwareBitmapConvertedAsync(BitmapPixelFormat::Bgra8, BitmapAlphaMode::Premultiplied)
+        .map_err(e)?
+        .get()
+        .map_err(e)?;
+    let result = engine.RecognizeAsync(&bmp).map_err(e)?.get().map_err(e)?;
+
+    let mut lines = Vec::new();
+    for line in result.Lines().map_err(e)? {
+        let text = line.Text().map_err(e)?.to_string();
+        let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for w in line.Words().map_err(e)? {
+            let r = w.BoundingRect().map_err(e)?;
+            x0 = x0.min(r.X as f64);
+            y0 = y0.min(r.Y as f64);
+            x1 = x1.max((r.X + r.Width) as f64);
+            y1 = y1.max((r.Y + r.Height) as f64);
+        }
+        if text.trim().is_empty() || x0 > x1 {
+            continue;
+        }
+        lines.push(OcrLine { text, x: x0 / scale, y: y0 / scale, w: (x1 - x0) / scale, h: (y1 - y0) / scale });
+    }
+    let language = engine.RecognizerLanguage().and_then(|l| l.DisplayName()).map(|s| s.to_string()).unwrap_or_default();
+    Ok(OcrOut { lines, language })
+}
+
+#[cfg(not(windows))]
+fn ocr_impl(_png: Vec<u8>) -> Result<OcrOut, String> {
+    Err("Text recognition uses the built-in Windows OCR engine and is only available on Windows 10/11.".into())
+}
+
+#[tauri::command]
+async fn ocr(data_url: String) -> Result<OcrOut, String> {
+    let bytes = decode_url(&data_url)?;
+    blocking(move || ocr_impl(bytes)).await?
+}
+
+#[tauri::command]
+async fn copy_text(app: AppHandle, text: String) -> Result<(), String> {
+    app.clipboard().write_text(text).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn ui_load(app: AppHandle) -> Option<String> {
     fs::read_to_string(shared(&app).data_dir.join("ui-settings.json")).ok()
@@ -759,7 +857,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             capture, editor_init, editor_state, editor_title, save_svg, export_png, copy_png, open_file,
-            open_folder, overlay_init, overlay_done, ui_load, ui_save, ui_export, ui_import
+            open_folder, overlay_init, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text
         ])
         .setup(|app| {
             let data_dir = resolve_data_dir(app);

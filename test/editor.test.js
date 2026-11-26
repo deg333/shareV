@@ -21,6 +21,7 @@ const SHOT = process.env.SHOT; // optional screenshot path
       saveSvg: async (svg) => { window.__saved = svg; return '/tmp/x.svg'; },
       exportPng: async () => 'x.png', copyPng: async (d) => { window.__copied = d; return true; },
       openFile: async () => null, openFolder() {},
+      ocr: async () => ({ language: 'English', lines: [{ text: 'Hello window', x: 90, y: 95, w: 210, h: 34 }, { text: 'second line', x: 90, y: 140, w: 150, h: 30 }] }), copyText: async (t) => { window.__copied = t; },
       loadUi: async () => null, saveUi: async (j) => { window.__ui = j; }, exportUi: async (j) => { window.__export = j; return 'x.json'; }, importUi: async () => window.__import || null,
     };
   });
@@ -243,6 +244,21 @@ const SHOT = process.env.SHOT; // optional screenshot path
   out = await page.evaluate(() => window.__sharev.buildSvg());
   assert.ok(out.includes('id="effects"') && /&quot;type&quot;:&quot;blur&quot;/.test(out), 'unbaked keeps editable effects');
   await page.evaluate(() => { window.__state.bakeFx = true; });
+
+  // OCR sidebar: recognise, list, copy, place as SVG text
+  await page.click('#bOcr');
+  await page.waitForSelector('#ocrLines .ln');
+  assert.strictEqual(await page.locator('#ocrLines .ln').count(), 2, 'two lines listed');
+  assert.ok((await page.locator('#ocrLines textarea').first().inputValue()).includes('Hello window'));
+  await page.click('#ocrCopy');
+  assert.strictEqual(await page.evaluate(() => window.__copied), 'Hello window\nsecond line');
+  const nBefore = await page.evaluate(() => window.__state.shapes.length);
+  await page.click('#ocrPlace');
+  const placed = await page.evaluate(() => window.__state.shapes.slice(-4).map((s) => [s.type, s.text]));
+  assert.deepStrictEqual(placed.filter((p) => p[0] === 'text').map((p) => p[1]), ['Hello window', 'second line']);
+  assert.strictEqual(await page.evaluate(() => window.__state.shapes.length), nBefore + 4, 'cover rect + text per line');
+  assert.ok((await page.evaluate(() => window.__sharev.buildSvg())).includes('Hello window'), 'recognised text is real SVG text');
+  await page.click('#sideClose');
 
   if (SHOT) { await page.keyboard.press('Escape'); await page.screenshot({ path: SHOT }); }
   assert.deepStrictEqual(errors, [], 'no page errors');
