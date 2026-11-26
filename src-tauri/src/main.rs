@@ -482,6 +482,46 @@ async fn open_file(app: AppHandle, window: WebviewWindow) -> Result<Option<Value
 }
 
 #[tauri::command]
+async fn ui_load(app: AppHandle) -> Option<String> {
+    fs::read_to_string(shared(&app).data_dir.join("ui-settings.json")).ok()
+}
+
+#[tauri::command]
+async fn ui_save(app: AppHandle, json: String) -> Result<(), String> {
+    fs::write(shared(&app).data_dir.join("ui-settings.json"), json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn ui_export(app: AppHandle, json: String) -> Result<Option<String>, String> {
+    let dir = shared(&app).data_dir.clone();
+    let a = app.clone();
+    let picked = blocking(move || {
+        a.dialog()
+            .file()
+            .add_filter("ShareV settings", &["json"])
+            .set_directory(dir)
+            .set_file_name("ShareV-settings.json")
+            .blocking_save_file()
+    })
+    .await?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+async fn ui_import(app: AppHandle) -> Result<Option<String>, String> {
+    let dir = shared(&app).data_dir.clone();
+    let a = app.clone();
+    let picked = blocking(move || {
+        a.dialog().file().add_filter("ShareV settings", &["json"]).set_directory(dir).blocking_pick_file()
+    })
+    .await?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    fs::read_to_string(path).map(Some).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn open_folder(app: AppHandle) {
     let dir = save_dir(&shared(&app));
     open_path(&dir);
@@ -719,7 +759,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             capture, editor_init, editor_state, editor_title, save_svg, export_png, copy_png, open_file,
-            open_folder, overlay_init, overlay_done
+            open_folder, overlay_init, overlay_done, ui_load, ui_save, ui_export, ui_import
         ])
         .setup(|app| {
             let data_dir = resolve_data_dir(app);

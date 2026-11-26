@@ -484,7 +484,26 @@ const toolOpts = (() => {
   for (const k of Object.keys(DEFAULT_OPTS)) o[k] = { ...ALPHA, ...DEFAULT_OPTS[k], ...(saved[k] || {}) };
   return o;
 })();
-const persistOpts = () => { try { localStorage.setItem(OPTS_KEY, JSON.stringify(toolOpts)); } catch { /* ignore */ } };
+let saveTimer = 0;
+/** Persist tool options + custom colours: localStorage (fallback) and ShareV-Data/ui-settings.json (portable). */
+function persistOpts() {
+  try { localStorage.setItem(OPTS_KEY, JSON.stringify(toolOpts)); } catch { /* ignore */ }
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { if (window.api.saveUi) window.api.saveUi(settingsJson()).catch(() => {}); }, 400);
+}
+const settingsJson = () => JSON.stringify({ app: 'ShareV', version: 1, toolOpts, customColors }, null, 2);
+function applySettings(obj) {
+  const src = (obj && obj.toolOpts) || {};
+  for (const k of Object.keys(DEFAULT_OPTS)) {
+    const clean = {};
+    for (const [key, val] of Object.entries(src[k] || {})) if (key in DEFAULT_OPTS[k] || key in ALPHA) clean[key] = val;
+    toolOpts[k] = { ...ALPHA, ...DEFAULT_OPTS[k], ...clean };
+  }
+  customColors = Array.isArray(obj && obj.customColors) ? obj.customColors.filter((c) => /^#[0-9a-f]{6}$/i.test(c)).slice(0, 16) : [];
+  const type = ctxType();
+  if (type && state.tool !== 'select') loadOpts(type);
+  updateControls();
+}
 
 const P = {
   stroke: $('pStroke'), fill: $('pFill'), fillOn: $('pFillOn'), text: $('pText'),
@@ -1057,7 +1076,7 @@ palette.addEventListener('click', (e) => {
   if (e.target.classList.contains('save') && paletteFor) {
     const hex = paletteFor.value.toLowerCase();
     if (!customColors.includes(hex)) customColors = [hex, ...customColors].slice(0, 16);
-    try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(customColors)); } catch { /* ignore */ }
+    persistOpts();
     const btn = document.querySelector(`button.pal[data-for="${paletteFor.id}"]`);
     paletteFor = null; showPalette(btn);
   }
@@ -1080,6 +1099,20 @@ const SHORTCUTS = [
 $('helpBody').innerHTML = SHORTCUTS.map(([title, rows]) => `<h3>${title}</h3>` +
   rows.map(([a, k]) => `<div class="row"><span>${esc(a)}</span><span><kbd>${esc(k)}</kbd></span></div>`).join('')).join('');
 const help = $('help');
+// ---- settings menu
+const menu = $('menu');
+$('bSettings').onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
+document.addEventListener('mousedown', (e) => { if (!menu.hidden && !menu.contains(e.target) && !e.target.closest('#bSettings')) menu.hidden = true; });
+menu.addEventListener('click', (e) => guard(async () => {
+  const act = e.target.closest('button') && e.target.closest('button').dataset.act;
+  if (!act) return;
+  menu.hidden = true;
+  if (act === 'export') { const f = await window.api.exportUi(settingsJson()); if (f) flash('Settings exported to ' + f); }
+  else if (act === 'import') {
+    const txt = await window.api.importUi();
+    if (txt) { const obj = JSON.parse(txt); if (!obj || typeof obj !== 'object' || !obj.toolOpts) throw new Error('Not a ShareV settings file'); applySettings(obj); persistOpts(); flash('Settings imported'); }
+  } else if (act === 'reset') { applySettings({}); persistOpts(); flash('Tool options reset to defaults'); }
+}));
 const toggleHelp = (on) => { help.hidden = on === undefined ? !help.hidden : !on; };
 $('bHelp').onclick = () => toggleHelp();
 $('helpClose').onclick = () => toggleHelp(false);
@@ -1172,6 +1205,9 @@ addEventListener('drop', (e) => {
 
 setTool('select');
 updateButtons();
+if (window.api.loadUi) {
+  window.api.loadUi().then((txt) => { if (txt) applySettings(JSON.parse(txt)); }).catch(() => {});
+}
 window.api.onLoad((p) => guard(() => loadImage(p.dataURL)));
 window.api.init().then((p) => { if (p) guard(() => loadImage(p.dataURL)); else window.api.setEmpty(true); });
 

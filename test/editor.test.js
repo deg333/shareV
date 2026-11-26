@@ -21,6 +21,7 @@ const SHOT = process.env.SHOT; // optional screenshot path
       saveSvg: async (svg) => { window.__saved = svg; return '/tmp/x.svg'; },
       exportPng: async () => 'x.png', copyPng: async (d) => { window.__copied = d; return true; },
       openFile: async () => null, openFolder() {},
+      loadUi: async () => null, saveUi: async (j) => { window.__ui = j; }, exportUi: async (j) => { window.__export = j; return 'x.json'; }, importUi: async () => window.__import || null,
     };
   });
   await page.goto('file://' + path.join(__dirname, '..', 'src', 'editor', 'index.html'));
@@ -145,6 +146,23 @@ const SHOT = process.env.SHOT; // optional screenshot path
   assert.ok(await page.locator('#help').isVisible() && (await page.locator('#help').innerText()).includes('Ctrl + ]'), 'shortcut help lists Ctrl+]');
   await page.keyboard.press('Escape');
   assert.strictEqual(await page.locator('#help').isHidden(), true);
+  await page.keyboard.press('Escape');
+
+  // settings: auto-saved to the backend, exportable, importable, resettable
+  await page.waitForTimeout(600);
+  const saved = JSON.parse(await page.evaluate(() => window.__ui));
+  assert.strictEqual(saved.toolOpts.rect.stroke, '#ff0000');
+  assert.ok(Array.isArray(saved.customColors) && saved.customColors.length >= 1, 'custom colours persisted');
+  await page.click('#bSettings'); await page.click('#menu [data-act="reset"]');
+  assert.deepStrictEqual(await page.evaluate(() => window.__ui && 1), 1);
+  await page.evaluate(() => { window.__import = JSON.stringify({ toolOpts: { rect: { stroke: '#123456', sw: 11 } }, customColors: ['#abcdef'] }); });
+  await page.click('#bSettings'); await page.click('#menu [data-act="import"]');
+  await page.keyboard.press('r');
+  assert.strictEqual(await page.inputValue('#pStroke'), '#123456', 'imported settings loaded');
+  assert.strictEqual(await page.inputValue('#pWidth'), '11');
+  await page.click('#bSettings'); await page.click('#menu [data-act="reset"]');
+  await page.keyboard.press('e'); await page.keyboard.press('r');
+  assert.strictEqual(await page.inputValue('#pStroke'), '#ff0000', 'reset restores defaults');
   await page.keyboard.press('Escape');
 
   // multi-select: rubber-band both shapes, change an option for all, nudge them together

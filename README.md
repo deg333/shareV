@@ -66,3 +66,7 @@ drag, arrow-key nudge, `Ctrl+D`, `Ctrl+]`/`[` and `Del` work on the whole select
 
 **Colour presets**: the ▾ button beside each colour opens basic HTML colours, the brand (Pantone) colours and your saved colours
 ("+ Save current colour"). **Shortcuts**: the Shortcuts button (or `?` / `F1`) lists every key binding.
+
+**Saved settings**: each tool's colours and options, plus your saved colours, are saved automatically to
+`ShareV-Data/ui-settings.json` (portable: copy the folder to carry them along). The Settings menu can export them
+to a file, import them on another machine, or reset to the defaults.

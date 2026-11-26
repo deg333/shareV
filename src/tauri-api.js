@@ -16,6 +16,10 @@
     copyPng: (dataUrl) => invoke('copy_png', { dataUrl }),
     openFile: () => invoke('open_file'),
     openFolder: () => invoke('open_folder'),
+    loadUi: () => invoke('ui_load'),
+    saveUi: (json) => invoke('ui_save', { json }),
+    exportUi: (json) => invoke('ui_export', { json }),
+    importUi: () => invoke('ui_import'),
     overlayInit: () => invoke('overlay_init'),
     overlayDone: (rect) => invoke('overlay_done', { rect: rect ? { ...rect, vw: window.innerWidth } : null }),
   };
