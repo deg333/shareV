@@ -686,7 +686,8 @@ async fn get_capture_opts(app: AppHandle) -> CaptureOpts {
 #[tauri::command]
 async fn set_capture_opts(app: AppHandle, delay: u32, include_self: bool) {
     {
-        let mut s = shared(&app).settings.lock().unwrap();
+        let sh = shared(&app);
+        let mut s = sh.settings.lock().unwrap();
         s.capture_delay = delay.min(5);
         s.capture_self = include_self;
     }
