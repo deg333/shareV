@@ -679,7 +679,7 @@ try {
   const raw = localStorage.getItem(FAV_KEY);
   if (raw !== null) favEmoji = (JSON.parse(raw) || []).filter((x) => typeof x === 'string').slice(0, 200);
 } catch { /* ignore */ }
-const settingsJson = () => JSON.stringify({ app: 'ShareV', version: 1, toolOpts, customColors, bakeFx: state.bakeFx, favEmoji }, null, 2);
+const settingsJson = () => JSON.stringify({ app: 'ShareV', version: 1, toolOpts, customColors, bakeFx: state.bakeFx, favEmoji, calc: window.ShareVCalc ? window.ShareVCalc.getState() : undefined }, null, 2);
 function applySettings(obj) {
   const src = (obj && obj.toolOpts) || {};
   for (const k of Object.keys(DEFAULT_OPTS)) {
@@ -687,6 +687,7 @@ function applySettings(obj) {
     for (const [key, val] of Object.entries(src[k] || {})) if (key in DEFAULT_OPTS[k] || key in ALPHA || key in SHADOW_DEFAULT) clean[key] = val;
     toolOpts[k] = { ...ALPHA, ...(SHADOWY.has(k) ? SHADOW_DEFAULT : {}), ...DEFAULT_OPTS[k], ...clean };
   }
+  if (obj && obj.calc && window.ShareVCalc) window.ShareVCalc.setState(obj.calc); // history survives a reset, comes back on import
   state.bakeFx = !(obj && obj.bakeFx === false);
   if (obj && Array.isArray(obj.favEmoji)) { favEmoji = obj.favEmoji.filter((x) => typeof x === 'string').slice(0, 200); if (typeof renderPicker === 'function' && !ep.hidden) renderPicker(); }
   if (typeof refreshBakeLabel === 'function') refreshBakeLabel();
@@ -1291,10 +1292,14 @@ const openFile = () => guard(async () => {
 // ------------------------------------------------------------------ OCR sidebar
 const side = $('side'), ocrLinesEl = $('ocrLines'), ocrStatus = $('ocrStatus');
 const ocrState = { lines: [], busy: false };
-function openSide(on = true) {
-  side.hidden = !on;
+/** One sidebar at a time: 'ocr', 'calc' or null (both closed). */
+function openPanel(which) {
+  side.hidden = which !== 'ocr';
+  $('calcSide').hidden = which !== 'calc';
   if (state.loaded) fit();
 }
+window.__openPanel = openPanel;
+function openSide(on = true) { openPanel(on ? 'ocr' : null); }
 function showHl(box) {
   $('hl').innerHTML = box
     ? `<rect x="${box.x - 3}" y="${box.y - 3}" width="${box.w + 6}" height="${box.h + 6}" fill="rgba(255,176,32,.18)" stroke="#ffb020" stroke-width="${2 / state.zoom}" stroke-dasharray="${5 / state.zoom} ${3 / state.zoom}"/>` : '';
@@ -1308,6 +1313,7 @@ function renderSide() {
 function copyText(text) {
   return window.api.copyText ? window.api.copyText(text) : navigator.clipboard.writeText(text);
 }
+window.__copyText = copyText; window.__flash = (m) => flash(m); window.__persist = () => persistOpts();
 /** OCR the whole image (rect omitted) or a region. Blur/pixelate are burned in first, so redacted text is never read. */
 async function runOcr(rect) {
   if (!state.loaded || ocrState.busy) return;
@@ -1378,6 +1384,7 @@ function placeLines(lines) {
   flash(`${lines.length} SVG text line${lines.length === 1 ? '' : 's'} placed`);
 }
 $('bOcr').onclick = () => { openSide(); runOcr(); };
+$('bCalc').onclick = toggleCalc;
 $('ocrAll').onclick = () => runOcr();
 $('ocrRegion').onclick = () => { if (state.loaded) setTool('ocr'); };
 $('sideClose').onclick = () => { openSide(false); showHl(null); };
@@ -1648,7 +1655,7 @@ loadHotkeys();
 // ------------------------------------------------------------------ keyboard shortcut help
 const SHORTCUTS = [
   ['Tools', [['Select / move', 'V'], ['Rectangle', 'R'], ['Ellipse', 'E'], ['Line', 'L'], ['Arrow', 'A'], ['Pen (bezier curves)', 'P'], ['Freehand (smoothed)', 'F'],
-    ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H'], ['Blur region', 'U'], ['Pixelate region', 'X'], ['Recognise text in region (OCR)', 'O'], ['Emoji stamp', 'M']]],
+    ['Text', 'T'], ['Text box', 'B'], ['Balloon', 'C'], ['Step number', 'N'], ['Highlight', 'H'], ['Calculator / unit converter sidebar', 'F2'], ['Blur region', 'U'], ['Pixelate region', 'X'], ['Recognise text in region (OCR)', 'O'], ['Emoji stamp', 'M']]],
   ['Selecting', [['Select several', 'Drag a box, or Shift/Ctrl + click'], ['Select all', 'Ctrl + A'], ['Deselect / back to Select', 'Esc'], ['Edit text of selected', 'Enter / double-click']]],
   ['Style', [['Copy style of selected shape', 'Ctrl + Shift + C'], ['Paste style onto selection', 'Ctrl + Shift + V'], ['Style painter tool', 'K'], ['Context menu with these and more', 'right-click a shape']]],
   ['Editing the selection', [['Nudge 1 px', '← ↑ → ↓'], ['Nudge 10 px', 'Shift + arrow keys'], ['Duplicate', 'Ctrl + D'], ['Bring to front', 'Ctrl + ]'],
@@ -1795,8 +1802,14 @@ stage.addEventListener('wheel', (e) => {
 addEventListener('resize', () => { if (state.loaded && state.zoom <= 1) fit(); });
 
 const KEYS = { v: 'select', r: 'rect', e: 'ellipse', l: 'line', a: 'arrow', f: 'pen', p: 'bezier', t: 'text', b: 'textbox', c: 'balloon', h: 'highlight', n: 'step', u: 'blur', x: 'pixelate', o: 'ocr', m: 'emoji', k: 'painter' };
+function toggleCalc() {
+  if (!window.ShareVCalc) return;
+  if (!$('calcSide').hidden) openPanel(null); else window.ShareVCalc.open();
+}
+addEventListener('keydown', (e) => { if (e.key === 'F2') { e.preventDefault(); toggleCalc(); } }, true);
 addEventListener('keydown', (e) => {
   const tag = e.target.tagName;
+  if (e.target.closest && e.target.closest('#calcSide')) return; // the calculator panel handles its own keys
   if (tag === 'TEXTAREA' || (tag === 'INPUT' && ['number', 'text'].includes(e.target.type))) return; // typing; sliders/checkboxes keep shortcuts
   const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
   if (!help.hidden) { if (k === 'escape' || k === '?' || k === 'f1') { toggleHelp(false); e.preventDefault(); } return; }

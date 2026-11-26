@@ -111,3 +111,12 @@ Duplicate, Bring to front, Send to back, Delete). `Ctrl+Shift+C` / `Ctrl+Shift+V
 in the top bar) copy a shape's line/fill colours, widths, opacity, text colour/bold/size, shadow and arrowheads and
 paste what applies onto every selected shape (even of a different type). The **Style painter** tool (`K`) copies on the
 first click and applies on each further click (Shift-click picks a new style, `Esc` finishes).
+
+**Calculator & unit converter (sidebar, `F2` or the Calc button)**
+- *Calculator*: scientific — `+ − × ÷ ^ % !`, parentheses, `sin cos tan asin acos atan sinh… ln log log2 sqrt cbrt abs exp
+  nroot atan2 min max mod`, `pi e`, implicit multiplication (`2pi`, `3(4+1)`), Deg/Rad, `ans` and memory (MC MR M+ M−).
+  Type in the box (Enter evaluates) or use the keys; a live preview shows the result as you type.
+- *Convert*: Length, Mass, Pressure, Speed, Temperature, Time, Volume, Air flow (CFM, m³/h, L/s…) and Torque
+  (N·m, lbf·ft, kgf·m…). Type in either box; the other updates. Adjustable digits, swap button.
+- *History* (both tabs): click a result to insert it, click an expression/entry to reload it; hover for copy result /
+  copy "expression = result" / delete. Histories are saved with your settings (`ShareV-Data/ui-settings.json`).

@@ -389,6 +389,73 @@ const SHOT = process.env.SHOT; // optional screenshot path
   await page.keyboard.press('Alt+PrintScreen');
   assert.deepStrictEqual(await page.evaluate(() => window.__caps), ['region', 'full', 'window'], 'editor-side hotkey fallback');
 
+  // calculator + unit converter sidebar
+  await page.click('#bCalc');
+  assert.ok(await page.locator('#calcSide').isVisible() && await page.locator('#side').isHidden(), 'calculator sidebar replaces the OCR one');
+  await page.locator('#calcIn').click();
+  await page.keyboard.type('2*sin(30)+3^2');
+  assert.strictEqual((await page.locator('#calcPrev').innerText()).trim(), '= 10', 'live preview (degrees by default)');
+  assert.strictEqual(await page.evaluate(() => window.__state.tool), 'select', 'typing does not trigger tool shortcuts');
+  await page.keyboard.press('Enter');
+  assert.strictEqual(await page.inputValue('#calcIn'), '10');
+  await page.click('#calcSide .k[data-k="*"]'); await page.click('#calcSide .k[data-k="2"]'); await page.click('#calcSide .k[data-k="@eq"]');
+  assert.strictEqual(await page.inputValue('#calcIn'), '20');
+  assert.strictEqual(await page.locator('#calcHist .h').count(), 2);
+  assert.ok((await page.locator('#calcHist .h').first().innerText()).includes('10*2'), 'newest entry first');
+  await page.click('#degBtn');
+  await page.fill('#calcIn', 'sin(pi/2)'); await page.keyboard.press('Enter');
+  assert.strictEqual(await page.inputValue('#calcIn'), '1', 'radian mode');
+  await page.click('#degBtn');
+  // reuse history: click a result to insert it, click an expression to reload it
+  await page.fill('#calcIn', '5+'); await page.locator('#calcHist .h').nth(1).locator('.r').click();
+  assert.strictEqual(await page.inputValue('#calcIn'), '5+20');
+  await page.locator('#calcHist .h').nth(1).locator('.e').click();
+  assert.strictEqual(await page.inputValue('#calcIn'), '2*sin(30)+3^2'.length ? await page.inputValue('#calcIn') : '');
+  // copy
+  await page.locator('#calcHist .h').first().hover();
+  await page.locator('#calcHist .h').first().locator('[data-a="call"]').click();
+  assert.ok(/^.+ = .+$/.test(await page.evaluate(() => window.__copied)), 'copy "expression = result"');
+  await page.locator('#calcHist .h').first().hover();
+  await page.locator('#calcHist .h').first().locator('[data-a="cres"]').click();
+  assert.ok(/^[-\d.e]+$/.test(await page.evaluate(() => window.__copied)), 'copy just the result');
+  // mixed features
+  await page.fill('#calcIn', '5!+sqrt(16)'); await page.keyboard.press('Enter');
+  assert.strictEqual(await page.inputValue('#calcIn'), '124');
+  await page.fill('#calcIn', '1/0'); await page.keyboard.press('Enter');
+  assert.ok((await page.locator('#calcPrev').innerText()).length > 0 && await page.locator('#calcPrev.err').count() === 1, 'errors are shown, not thrown');
+
+  await page.click('#calcSide [data-tab="conv"]');
+  await page.selectOption('#cvDigits', '6');
+  await page.fill('#cvA', '100'); await page.press('#cvA', 'Enter');
+  assert.deepStrictEqual([await page.inputValue('#cvB')], ['3.93701'], '100 mm = 3.93701 in, like the reference screenshot');
+  assert.strictEqual(await page.locator('#cvHist .h').count(), 1, 'saved to history on Enter');
+  await page.fill('#cvB', '1'); // type in the other box: converts backwards
+  assert.strictEqual(await page.inputValue('#cvA'), '25.4');
+  const cats = await page.locator('#cvCat option').allInnerTexts();
+  assert.deepStrictEqual(cats, ['Length', 'Mass', 'Pressure', 'Speed', 'Temperature', 'Time', 'Volume', 'Air flow', 'Torque']);
+  await page.selectOption('#cvCat', 'Temperature');
+  await page.fill('#cvA', '100'); await page.press('#cvA', 'Enter');
+  assert.strictEqual(await page.inputValue('#cvB'), '212', '100 C = 212 F');
+  await page.selectOption('#cvCat', 'Air flow');
+  await page.fill('#cvA', '1000'); await page.press('#cvA', 'Enter');
+  assert.ok(Math.abs(parseFloat(await page.inputValue('#cvB')) - 588.58) < 0.01, 'm3/h -> CFM');
+  await page.click('#cvSwap');
+  assert.ok((await page.locator('#cvFrom').inputValue()).includes('CFM'));
+  assert.strictEqual(await page.locator('#cvHist .h').count(), 4, 'leaving a box saves it too');
+  await page.locator('#cvHist .h').nth(3).locator('.r').click(); // reload the oldest conversion
+  assert.deepStrictEqual([await page.inputValue('#cvCat'), await page.inputValue('#cvFrom'), await page.inputValue('#cvTo'), await page.inputValue('#cvA')], ['Length', 'Millimeter', 'Inch', '100']);
+  await page.locator('#cvHist .h').first().hover();
+  await page.locator('#cvHist .h').first().locator('[data-a="cline"]').click();
+  assert.ok(/ = /.test(await page.evaluate(() => window.__copied)), 'copy "a unit = b unit"');
+  await page.waitForTimeout(600);
+  const savedCalc = JSON.parse(await page.evaluate(() => window.__ui)).calc;
+  assert.ok(savedCalc.calc.history.length >= 3 && savedCalc.conv.history.length === 4, 'histories saved with the settings');
+  await page.keyboard.press('F2');
+  assert.ok(await page.locator('#calcSide').isHidden(), 'F2 closes the sidebar');
+  await page.keyboard.press('F2');
+  assert.ok(await page.locator('#calcSide').isVisible(), 'F2 reopens it');
+  await page.keyboard.press('F2');
+
   // capture options: delay and include ShareV itself
   await page.selectOption('#capDelay', '3');
   assert.deepStrictEqual(await page.evaluate(() => window.__cap), [3, false]);
