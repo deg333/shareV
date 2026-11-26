@@ -3,3 +3,4 @@ dist/
 ShareV-Data/
 src-tauri/target/
 src-tauri/gen/
+out/
