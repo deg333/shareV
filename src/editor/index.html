@@ -9,11 +9,11 @@
 <body>
 <header id="bar">
   <div class="grp" id="capGrp">
-    <button data-cap="full" title="Capture full screen (PrintScreen)">
+    <button data-cap="full" title="Capture full screen (Ctrl+PrintScreen)">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 21h8M12 17v4"/></svg><span>Screen</span></button>
     <button data-cap="window" title="Capture active window (Alt+PrintScreen)">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9h18"/></svg><span>Window</span></button>
-    <button data-cap="region" title="Capture region (Ctrl+PrintScreen)">
+    <button data-cap="region" title="Capture region (PrintScreen)">
       <svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" stroke-dasharray="0"/><rect x="9" y="9" width="6" height="6" stroke-dasharray="2 2"/></svg><span>Region</span></button>
     <button data-cap="lastRegion" title="Capture last region (Ctrl+Shift+PrintScreen)">
       <svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><path d="M12 9v3l2 1.5"/></svg><span>Last</span></button>
@@ -72,8 +72,8 @@
   <div id="welcome">
     <h1>ShareV</h1>
     <p>Capture the screen or open an image / SVG to start annotating.</p>
-    <p class="keys"><kbd>PrintScreen</kbd> full screen &nbsp; <kbd>Alt+PrintScreen</kbd> window<br>
-      <kbd>Ctrl+PrintScreen</kbd> region &nbsp; <kbd>Ctrl+Shift+PrintScreen</kbd> last region</p>
+    <p class="keys"><kbd>PrintScreen</kbd> region &nbsp; <kbd>Alt+PrintScreen</kbd> window<br>
+      <kbd>Ctrl+PrintScreen</kbd> full screen &nbsp; <kbd>Ctrl+Shift+PrintScreen</kbd> last region</p>
   </div>
   <div id="wrap" hidden>
     <svg id="svg" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">

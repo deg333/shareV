@@ -1094,7 +1094,7 @@ const SHORTCUTS = [
     ['Pen: remove last point', 'Backspace'], ['Finish text', 'Ctrl + Enter / Esc']]],
   ['File & view', [['Open', 'Ctrl + O'], ['Save SVG', 'Ctrl + S'], ['Save SVG as…', 'Ctrl + Shift + S'], ['Copy image', 'Ctrl + C'], ['Paste image', 'Ctrl + V'],
     ['Zoom in / out', 'Ctrl + + / Ctrl + −  (or Ctrl + wheel)'], ['Fit / actual size', 'Ctrl + 0 / Ctrl + 1'], ['This help', '? / F1']]],
-  ['Capture (global)', [['Full screen', 'PrintScreen'], ['Active window', 'Alt + PrintScreen'], ['Region', 'Ctrl + PrintScreen'], ['Last region', 'Ctrl + Shift + PrintScreen']]],
+  ['Capture (global)', [['Region', 'PrintScreen'], ['Active window', 'Alt + PrintScreen'], ['Full screen', 'Ctrl + PrintScreen'], ['Last region', 'Ctrl + Shift + PrintScreen']]],
 ];
 $('helpBody').innerHTML = SHORTCUTS.map(([title, rows]) => `<h3>${title}</h3>` +
   rows.map(([a, k]) => `<div class="row"><span>${esc(a)}</span><span><kbd>${esc(k)}</kbd></span></div>`).join('')).join('');

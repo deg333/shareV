@@ -39,8 +39,8 @@ struct Hotkeys {
 impl Default for Hotkeys {
     fn default() -> Self {
         Self {
-            fullscreen: "PrintScreen".into(),
-            region: "CommandOrControl+PrintScreen".into(),
+            fullscreen: "CommandOrControl+PrintScreen".into(),
+            region: "PrintScreen".into(),
             window: "Alt+PrintScreen".into(),
             last_region: "CommandOrControl+Shift+PrintScreen".into(),
         }
@@ -764,10 +764,15 @@ fn main() {
         .setup(|app| {
             let data_dir = resolve_data_dir(app);
             let settings_file = data_dir.join("settings.json");
-            let settings: Settings = fs::read_to_string(&settings_file)
+            let mut settings: Settings = fs::read_to_string(&settings_file)
                 .ok()
                 .and_then(|t| serde_json::from_str(&t).ok())
                 .unwrap_or_default();
+            // the defaults used to be PrintScreen = full screen, Ctrl+PrintScreen = region: swap those, leave custom ones alone
+            if settings.hotkeys.fullscreen == "PrintScreen" && settings.hotkeys.region == "CommandOrControl+PrintScreen" {
+                settings.hotkeys.fullscreen = "CommandOrControl+PrintScreen".into();
+                settings.hotkeys.region = "PrintScreen".into();
+            }
             let hk = settings.hotkeys.clone();
             app.manage(Shared {
                 data_dir,

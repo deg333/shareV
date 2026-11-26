@@ -6,9 +6,9 @@ Built with Electron; no installer, no registry, all data lives next to the execu
 ## Capture
 | Mode | Default hotkey |
 |---|---|
-| Full screen (monitor under the cursor) | `PrintScreen` |
+| Region (drag a rectangle, `Esc`/right-click cancels) | `PrintScreen` |
 | Active window | `Alt+PrintScreen` |
-| Region (drag a rectangle, `Esc`/right-click cancels) | `Ctrl+PrintScreen` |
+| Full screen (monitor under the cursor) | `Ctrl+PrintScreen` |
 | Last region | `Ctrl+Shift+PrintScreen` |
 
 Also available from the tray icon and the editor toolbar. On Windows the PrintScreen combinations use a low-level keyboard hook, so they work even though the shell/Snipping Tool normally owns that key (and are swallowed so it does not also open). Hotkeys, save folder and
