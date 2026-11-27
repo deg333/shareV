@@ -12,8 +12,10 @@
   const st = {
     inv: 1, graph: 'x', showGraph: true, units: 'SI',
     r: 40, l: 120, e: 0, rpm: 20, F: 100, m: 0.5,
-    preset: 'IC Engine', phase: 18 * D2R, th: 18 * D2R, playing: false,
+    preset: 'IC Engine', in2: 'link1', phase: 18 * D2R, th: 18 * D2R, playing: false,
   };
+  /** which angle turns uniformly (3 = the crank-to-rod angle beta, otherwise theta); see sim-core.js driveOf */
+  const drv = () => K.driveOf(st.inv, st.in2);
   const INV_NAME = ['', '1st', '2nd', '3rd', '4th'];
   const INV_TEXT = [
     '',
@@ -29,7 +31,8 @@
     'oscillating cylinder, crank & slotted-lever quick return',
     'hand pump, Bull engine',
   ];
-  const INPUT_TEXT = ['', 'input: crank turns at O₂', 'input: link 1 turns about the fixed crank O₂', 'input: crank turns about A relative to the fixed rod (β = θ + φ)', 'input: crank turns, the guide slides through the fixed block'];
+  const inputText = () => (st.inv === 2 && st.in2 === 'link3' ? 'input: link 3 turns about A (β = θ + φ)'
+    : ['', 'input: crank turns at O₂', 'input: link 1 turns about the fixed crank O₂', 'input: crank turns about A relative to the fixed rod (β = θ + φ)', 'input: crank turns, the guide slides through the fixed block'][st.inv]);
 
   // ------------------------------------------------------------------ units
   const U = {
@@ -50,14 +53,14 @@
 
   // ------------------------------------------------------------------ state persistence (small, local only)
   function saveLocal() {
-    try { localStorage.setItem(KEY, JSON.stringify({ inv: st.inv, graph: st.graph, showGraph: st.showGraph, units: st.units, r: st.r, l: st.l, e: st.e, rpm: st.rpm, F: st.F, m: st.m, preset: st.preset })); } catch { /* ignore */ }
+    try { localStorage.setItem(KEY, JSON.stringify({ inv: st.inv, graph: st.graph, showGraph: st.showGraph, units: st.units, r: st.r, l: st.l, e: st.e, rpm: st.rpm, F: st.F, m: st.m, preset: st.preset, in2: st.in2 })); } catch { /* ignore */ }
   }
   try {
     const o = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if (o) for (const k of ['inv', 'graph', 'showGraph', 'units', 'r', 'l', 'e', 'rpm', 'F', 'm', 'preset']) if (o[k] !== undefined) st[k] = o[k];
+    if (o) for (const k of ['inv', 'graph', 'showGraph', 'units', 'r', 'l', 'e', 'rpm', 'F', 'm', 'preset', 'in2']) if (o[k] !== undefined) st[k] = o[k];
   } catch { /* ignore */ }
   // the "Whole tool SVG" export starts the stand-alone copy in the state it was exported from
-  if (window.__SIM_INITIAL) for (const k of ['inv', 'graph', 'showGraph', 'units', 'r', 'l', 'e', 'rpm', 'F', 'm', 'preset']) if (window.__SIM_INITIAL[k] !== undefined) st[k] = window.__SIM_INITIAL[k];
+  if (window.__SIM_INITIAL) for (const k of ['inv', 'graph', 'showGraph', 'units', 'r', 'l', 'e', 'rpm', 'F', 'm', 'preset', 'in2']) if (window.__SIM_INITIAL[k] !== undefined) st[k] = window.__SIM_INITIAL[k];
   const STANDALONE = !!window.__SIM_INITIAL;
 
   // ------------------------------------------------------------------ DOM
@@ -83,12 +86,14 @@
           </div>
           <div class="card ctrl">
             <div class="row"><span class="lbl">INVERSION</span><div class="seg" id="segInv">${[1, 2, 3, 4].map((i) => `<button data-inv="${i}">${INV_NAME[i]}</button>`).join('')}</div>
+              <span class="lbl in2" id="in2Lbl">INPUT</span><div class="seg in2" id="segIn2"><button data-in2="link1" title="Link 1 (the slotted body) turns uniformly about the fixed crank - rotary engine">link 1 · O₂</button><button data-in2="link3" title="Link 3 turns uniformly about A - Whitworth quick return">link 3 · A</button></div>
               <span class="lbl">GRAPH</span><div class="seg" id="segGraph"><button data-g="x">x(θ)</button><button data-g="v">v(θ)</button><button data-g="a">a(θ)</button><button data-g="T">T(θ)</button></div>
               <button id="btnShow" class="toggle"></button>
               <span class="lbl">UNITS</span><div class="seg" id="segUnits"><button data-u="SI">SI</button><button data-u="Imperial">Imperial</button></div></div>
             <div class="row"><span class="lbl">PRESETS</span><div class="presets" id="presets">${Object.keys(K.PRESETS).map((n) => `<button data-p="${n}">${n}</button>`).join('')}</div>
               <button id="btnPlay" class="play">▶ Run</button><button id="btnStepB" title="Step back">⏮</button><button id="btnStepF" title="Step forward">⏭</button>
-              <button id="btnExport" class="export" title="Save this frame as a clean, heavily commented SVG file">⇩ Export SVG</button><button id="btnExportAnim" class="export" title="Save an animated SVG with play/pause, direction, speed and angle controls (open it in a browser)">⇩ Animated SVG</button><button id="btnExportSmil" class="export" title="Save a looping animated SVG that needs no script (plays in img tags and many viewers; no controls)">⇩ No-script SVG</button><button id="btnExportTool" class="export" title="Save this whole interactive simulator as ONE svg file (open it in a browser)">⇩ Whole tool SVG</button></div>
+              </div>
+            <div class="row"><span class="lbl">EXPORT</span><button id="btnExport" class="export" title="Save this frame as a clean, heavily commented SVG file">⇩ Export SVG</button><button id="btnExportAnim" class="export" title="Save an animated SVG with play/pause, direction, speed and angle controls (open it in a browser)">⇩ Animated SVG</button><button id="btnExportSmil" class="export" title="Save a looping animated SVG that needs no script (plays in img tags and many viewers; no controls)">⇩ No-script SVG</button><button id="btnExportTool" class="export" title="Save this whole interactive simulator as ONE svg file (open it in a browser)">⇩ Whole tool SVG</button></div>
           </div>
           <div class="card sliders" id="sliders">${sliders.map((s) => `
             <div class="sl ${s.color}"><span class="chip">${s.chip}</span><span class="nm">${s.label}${s.sym ? ` <i>${s.sym}</i>` : ''}</span>
@@ -113,7 +118,8 @@
 
   function wire() {
     $('simClose').onclick = close;
-    $('segInv').onclick = (e) => { const b = e.target.closest('button'); if (b) { st.inv = +b.dataset.inv; st.preset = ''; st.th = K.thetaFromPhase(params(), st.inv, st.phase, st.th); changed(true); } };
+    $('segInv').onclick = (e) => { const b = e.target.closest('button'); if (b) { st.inv = +b.dataset.inv; st.preset = ''; st.th = K.thetaFromPhase(params(), drv(), st.phase, st.th); changed(true); } };
+    $('segIn2').onclick = (e) => { const b = e.target.closest('button'); if (b) { st.in2 = b.dataset.in2; st.preset = ''; st.phase = st.th; if (drv() === 3) { const k = K.kin(params(), st.th); if (k) st.phase = st.th + k.phi; } changed(true); } };
     $('segGraph').onclick = (e) => { const b = e.target.closest('button'); if (b) { st.graph = b.dataset.g; changed(); } };
     $('segUnits').onclick = (e) => { const b = e.target.closest('button'); if (b) { st.units = b.dataset.u; applySliderRanges(); changed(); } };
     $('btnShow').onclick = () => { st.showGraph = !st.showGraph; changed(); };
@@ -121,7 +127,7 @@
       const b = e.target.closest('button');
       if (!b) return;
       const p = K.PRESETS[b.dataset.p];
-      Object.assign(st, { inv: p.inv, r: p.r, l: p.l, e: p.e, rpm: p.rpm, preset: b.dataset.p });
+      Object.assign(st, { inv: p.inv, in2: p.in2 || 'link1', r: p.r, l: p.l, e: p.e, rpm: p.rpm, preset: b.dataset.p });
       st.phase = 18 * D2R; st.th = st.phase;
       applySliderRanges();
       changed(true);
@@ -137,7 +143,7 @@
       const th = Math.max(0, Math.min(1, (x - GM.l) / (gInfo.gw - GM.l - GM.r))) * 2 * Math.PI;
       st.th = th;
       const k = K.kin(params(), th);
-      st.phase = st.inv === 3 && k ? th + k.phi : th;
+      st.phase = drv() === 3 && k ? th + k.phi : th;
       st.playing = false; render(true);
     });
     $('btnExport').onclick = doExport;
@@ -153,7 +159,7 @@
       for (const [k, id] of [['work', 'paneWork'], ['theory', 'paneTheory'], ['pros', 'panePros']]) $(id).hidden = b.dataset.mt !== k;
       if (b.dataset.mt !== 'work') buildTheory();
     };
-    if (window.ResizeObserver) new ResizeObserver(() => { if (!root.hidden && st.showGraph) { gKey = ''; const s = K.solve(params(), st.inv, st.th, omegaOf(), load()); if (s) drawGraph(s); } }).observe($('graphCard'));
+    if (window.ResizeObserver) new ResizeObserver(() => { if (!root.hidden && st.showGraph) { gKey = ''; const s = K.solve(params(), drv(), st.th, omegaOf(), load()); if (s) drawGraph(s); } }).observe($('graphCard'));
     for (const s of sliders) {
       $('sl_' + s.id).addEventListener('input', (e) => {
         const raw = parseFloat(e.target.value);
@@ -201,7 +207,7 @@
   function step(dir, big) { st.playing = false; advance(dir * (big ? 10 : 1) * D2R); render(true); }
   function advance(dphase) {
     st.phase += dphase;
-    st.th = K.thetaFromPhase(params(), st.inv, st.phase, st.th);
+    st.th = K.thetaFromPhase(params(), drv(), st.phase, st.th);
   }
   function loop(ts) {
     cancelAnimationFrame(raf);
@@ -230,7 +236,7 @@
   }
   const ringR = () => Math.max(1.55 * st.r, st.r + 18);
   function fitView() {
-    const p = params(), m = K.metrics(p, st.inv);
+    const p = params(), m = K.metrics(p, drv());
     const pts = [];
     const gp = 0.3 * p.r + 14;
     for (let t = 0; t < 360; t += 4) {
@@ -254,7 +260,7 @@
    *  comments in the exported file) and the SVG markup itself, in screen pixels. */
   function mechSections(sol) {
     const p = params(), th = sol.th, u = un();
-    const m = K.metrics(p, st.inv);
+    const m = K.metrics(p, drv());
     const T = xform(th, sol), X = T.f;
     const O = P(X({ x: 0, y: 0 })), A = P(X({ x: p.r * Math.cos(th), y: p.r * Math.sin(th) })), B = P(X({ x: sol.x, y: p.e }));
     const gp = 0.3 * p.r + 14;
@@ -336,11 +342,11 @@
 
     // ---- input arrow: centred exactly on the pivot the input turns about
     {
-      const C = st.inv === 3 ? A : O, R = 30, ccw = st.inv !== 2;
-      const [a1, a2] = st.inv === 3 ? [55, 125] : [-125, -55];
+      const atA = drv() === 3, C = atA ? A : O, R = 30, ccw = st.inv !== 2;
+      const [a1, a2] = atA ? [55, 125] : [-125, -55];
       const pt = (deg) => ({ x: C.x + R * Math.cos(deg * D2R), y: C.y - R * Math.sin(deg * D2R) });
       const s0 = ccw ? pt(a1) : pt(a2), s1 = ccw ? pt(a2) : pt(a1);
-      add('input-arrow', 'INPUT ROTATION ARROW', `A circular arc of radius ${R} px centred exactly on the pivot the input turns about (${st.inv === 3 ? 'A, because the rod is the fixed link' : 'O2'} at ${pxs(C)}), drawn ${ccw ? 'counter-clockwise' : 'clockwise'}. The arrow head sits at the end of the arc.`,
+      add('input-arrow', 'INPUT ROTATION ARROW', `A circular arc of radius ${R} px centred exactly on the pivot the input turns about (${atA ? 'A, because link 3 turns about A relative to the crank' : 'O2'} at ${pxs(C)}), drawn ${ccw ? 'counter-clockwise' : 'clockwise'}. The arrow head sits at the end of the arc.`,
         `<path d="M ${s0.x.toFixed(1)} ${s0.y.toFixed(1)} A ${R} ${R} 0 0 ${ccw ? 0 : 1} ${s1.x.toFixed(1)} ${s1.y.toFixed(1)}" fill="none" stroke="#2ea898" stroke-width="2.6" marker-end="url(#arrT)"/>`);
     }
     return { secs, O, A, B, m, hasE };
@@ -372,9 +378,9 @@
     .linklbl    { fill: #fff; font-size: 13px; font-weight: 700; paint-order: stroke; stroke: rgba(0,0,0,.35); stroke-width: 2px; }
     .linklbl.small { font-size: 11px; }`;
   function exportSvg() {
-    const sol = K.solve(params(), st.inv, st.th, omegaOf(), load());
+    const sol = K.solve(params(), drv(), st.th, omegaOf(), load());
     if (!sol) return '';
-    const p = params(), u = un(), m = K.metrics(p, st.inv);
+    const p = params(), u = un(), m = K.metrics(p, drv());
     const { secs } = mechSections(sol);
     const pretty = (s) => s.replace(/></g, '>\n      <');
     const deg = (v) => num(v * R2D, 2) + ' deg';
@@ -468,14 +474,14 @@ ${body}
   }
   /** animated, interactive SVG (see sim-export.js): the same drawing, moved by a small commented script, with a few controls */
   function exportAnimated() {
-    const p = params(), u = un(), m = K.metrics(p, st.inv);
-    const sol = K.solve(p, st.inv, st.th, omegaOf(), load());
+    const p = params(), u = un(), m = K.metrics(p, drv());
+    const sol = K.solve(p, drv(), st.th, omegaOf(), load());
     if (!sol || !window.SimExport) return '';
     const gp = 0.3 * p.r + 14;
     const { secs, hasE } = mechSections(sol);
     const prot = secs.find((s) => s.id === 'protractor');
     return window.SimExport.animatedSvg({
-      r: p.r, l: p.l, e: p.e, inv: st.inv, rpm: st.rpm, theta: st.th, phase: st.phase,
+      r: p.r, l: p.l, e: p.e, inv: st.inv, beta: drv() === 3, rpm: st.rpm, theta: st.th, phase: st.phase,
       view: { s: view.s, ox: view.ox, oy: view.oy }, gl: Math.min(0, m.xb - gp), gr: m.xt + gp, xb: m.xb, xt: m.xt, hasE,
       units: { len: u.len, k: u.L(1) }, protractor: prot ? prot.svg.replace(/></g, '>\n    <') : '', metrics: m,
       texts: { date: new Date().toISOString().slice(0, 10), invName: INV_NAME[st.inv], invText: INV_TEXT[st.inv], invUse: INV_USE[st.inv] },
@@ -483,14 +489,14 @@ ${body}
   }
   /** looping SMIL animation without any script (plays inside <img>, many viewers and e-mail) */
   function exportSmil() {
-    const p = params(), u = un(), m = K.metrics(p, st.inv);
-    const sol = K.solve(p, st.inv, st.th, omegaOf(), load());
+    const p = params(), u = un(), m = K.metrics(p, drv());
+    const sol = K.solve(p, drv(), st.th, omegaOf(), load());
     if (!sol || !window.SimExport) return '';
     const gp = 0.3 * p.r + 14;
     const { secs, hasE } = mechSections(sol);
     const prot = secs.find((x) => x.id === 'protractor');
     return window.SimExport.smilSvg({
-      r: p.r, l: p.l, e: p.e, inv: st.inv, rpm: st.rpm, theta: st.th, phase: st.phase,
+      r: p.r, l: p.l, e: p.e, inv: st.inv, beta: drv() === 3, rpm: st.rpm, theta: st.th, phase: st.phase,
       view: { s: view.s, ox: view.ox, oy: view.oy }, gl: Math.min(0, m.xb - gp), gr: m.xt + gp, xb: m.xb, xt: m.xt, hasE,
       units: { len: u.len, k: u.L(1) }, protractor: prot ? prot.svg.replace(/></g, '>\n    <') : '', metrics: m,
       texts: { date: new Date().toISOString().slice(0, 10), invName: INV_NAME[st.inv], invText: INV_TEXT[st.inv], invUse: INV_USE[st.inv] },
@@ -526,9 +532,9 @@ ${body}
       toast('Building the whole tool…');
       const bundle = await loadBundle();
       const p = params(), u = un();
-      const sol = K.solve(p, st.inv, st.th, omegaOf(), load());
+      const sol = K.solve(p, drv(), st.th, omegaOf(), load());
       if (!sol || !window.ToolExport) return;
-      const init = { inv: st.inv, graph: st.graph, showGraph: st.showGraph, units: st.units, r: st.r, l: st.l, e: st.e, rpm: st.rpm, F: st.F, m: st.m, preset: st.preset };
+      const init = { inv: st.inv, graph: st.graph, showGraph: st.showGraph, units: st.units, r: st.r, l: st.l, e: st.e, rpm: st.rpm, F: st.F, m: st.m, preset: st.preset, in2: st.in2 };
       const text = window.ToolExport.build(bundle, init, `<style>${SVG_CSS}</style>` + mechSvg(sol), {
         date: new Date().toISOString().slice(0, 10), invName: INV_NAME[st.inv],
         params: `r = ${num(u.L(p.r), 2)} ${u.len}, l = ${num(u.L(p.l), 2)} ${u.len}, e = ${num(u.L(p.e), 2)} ${u.len}, ${st.rpm} rpm`,
@@ -592,7 +598,7 @@ ${body}
   function drawGraphStatic(gw) {
     const u = un(), p = params(), om = omegaOf();
     const ys = [];
-    for (let t = 0; t <= 360; t += 1) { const s = K.solve(p, st.inv, t * D2R, om, load()); ys.push(s ? gValue(s) : null); }
+    for (let t = 0; t <= 360; t += 1) { const s = K.solve(p, drv(), t * D2R, om, load()); ys.push(s ? gValue(s) : null); }
     const valid = ys.filter((v) => v !== null);
     if (!valid.length) { $('simGraph').innerHTML = ''; gInfo = null; return; }
     let lo = Math.min(...valid), hi = Math.max(...valid);
@@ -651,7 +657,7 @@ ${body}
 
   /** the working as a flat list of items: {h: title} | {eq: tex} | {note: html} */
   function mathItems(s, m) {
-    const u = un(), p = params(), om = omegaOf(), inv = st.inv;
+    const u = un(), p = params(), om = omegaOf(), inv = st.inv, beta = drv() === 3;
     const L = (mm) => sig(u.L(mm));
     const thDeg = ((s.th * R2D) % 360 + 360) % 360, th = num(thDeg, 2);
     const sTh = Math.sin(s.th), cTh = Math.cos(s.th);
@@ -687,7 +693,7 @@ ${body}
     Q(`\\Ph'=\\dfrac{${r}\\cdot ${num(cTh, 4)}}{${l}\\cdot ${num(s.cp, 5)}}=${num(s.dphi, 5)}`);
     Q(`\\text{differentiate step 4:}\\quad \\Xs'=\\dfrac{d\\Xs}{d\\Th}=-\\Rk\\sin\\Th-\\Lr\\sin\\Ph\\,\\Ph'=-\\dfrac{\\Rk\\sin(\\Th+\\Ph)}{\\cos\\Ph}`);
     Q(`\\Xs'=-${r}\\cdot ${num(sTh, 4)}-${l}\\cdot ${num(s.s, 5)}\\cdot ${num(s.dphi, 5)}=${cn('slider', L(s.dx))}${un_}/\\text{rad}`);
-    if (inv === 3) {
+    if (beta) {
       Q(`\\text{rod fixed: } \\beta=\\Th+\\Ph\\ \\text{turns uniformly}\\ (\\dot\\beta=\\Om)\\ \\Rightarrow\\ \\dot\\Th=\\dfrac{\\Om}{1+\\Ph'}`);
       Q(`\\beta=${num(s.beta * R2D, 2)}^\\circ,\\quad \\dot\\Th=\\dfrac{${cn('speed', sig(om))}}{1+${num(s.dphi, 4)}}=${sig(s.thd)}\\ \\text{rad/s}`);
       N('θ is found from β = θ + φ(θ) by Newton iteration each frame.');
@@ -699,8 +705,8 @@ ${body}
     H(6, 'Slider acceleration');
     Q(`\\Ph''=\\dfrac{-\\Rk\\sin\\Th\\cos\\Ph+\\Rk\\cos\\Th\\sin\\Ph\\,\\Ph'}{\\Lr\\cos^{2}\\Ph}=${num(s.ddphi, 5)}`);
     Q(`\\Xs''=-\\Rk\\cos\\Th-\\Lr\\cos\\Ph\\,\\Ph'^{2}-\\Lr\\sin\\Ph\\,\\Ph''=${cn('slider', L(s.ddx))}${un_}/\\text{rad}^{2}`);
-    if (inv === 3) Q(`\\ddot\\Th=\\dfrac{-\\dot\\Th^{2}\\,\\Ph''}{1+\\Ph'}=${sig(s.thdd)}\\ \\text{rad/s}^2`);
-    Q(`\\As=\\Xs''\\,\\dot\\Th^{2}${inv === 3 ? '+\\Xs\'\\,\\ddot\\Th' : ''}=${L(s.ddx)}\\cdot ${sig(s.thd)}^{2}${inv === 3 ? `+${L(s.dx)}\\cdot ${sig(s.thdd)}` : ''}=${cn('slider', sig(u.L(s.a)))}${au}`);
+    if (beta) Q(`\\ddot\\Th=\\dfrac{-\\dot\\Th^{2}\\,\\Ph''}{1+\\Ph'}=${sig(s.thdd)}\\ \\text{rad/s}^2`);
+    Q(`\\As=\\Xs''\\,\\dot\\Th^{2}${beta ? '+\\Xs\'\\,\\ddot\\Th' : ''}=${L(s.ddx)}\\cdot ${sig(s.thd)}^{2}${beta ? `+${L(s.dx)}\\cdot ${sig(s.thdd)}` : ''}=${cn('slider', sig(u.L(s.a)))}${au}`);
 
     H(7, 'Rod angular motion');
     Q(`\\dot\\Ph=\\Ph'\\,\\dot\\Th=${num(s.dphi, 4)}\\cdot ${sig(s.thd)}=${cn('rod', sig(s.phid))}\\ \\text{rad/s},\\qquad \\ddot\\Ph=\\Ph''\\dot\\Th^{2}+\\Ph'\\ddot\\Th=${cn('rod', sig(s.phidd))}\\ \\text{rad/s}^2`);
@@ -708,7 +714,7 @@ ${body}
     H(8, 'Dead centres, stroke and time ratio');
     Q(`\\Xs_{TDC}=\\sqrt{(\\Lr+\\Rk)^2-\\Eo^2}=${cn('slider', L(m.xt))}${un_},\\qquad \\Xs_{BDC}=\\sqrt{(\\Lr-\\Rk)^2-\\Eo^2}=${cn('slider', L(m.xb))}${un_}`);
     Q(`\\text{stroke}=\\Xs_{TDC}-\\Xs_{BDC}=${cn('slider', L(m.stroke))}${un_}${Math.abs(p.e) < 1e-9 ? '\\ (=2\\Rk)' : ''}`);
-    if (inv === 3) {
+    if (beta) {
       Q(`\\text{lever swings between}\\ \\Th=\\pm 90^\\circ:\\quad \\beta\\ \\text{goes}\\ ${num(m.fwd * R2D, 2)}^\\circ\\ \\text{one way,}\\ ${num(m.ret * R2D, 2)}^\\circ\\ \\text{back}`);
       Q(`Q=\\dfrac{180^\\circ+2\\sin^{-1}(\\Rk/\\Lr)}{180^\\circ-2\\sin^{-1}(\\Rk/\\Lr)}\\ (e=0)\\quad\\Rightarrow\\quad Q=${num(m.ratio, 4)}`);
     } else {
@@ -722,7 +728,7 @@ ${body}
     Q(`\\Tq=${sig(s.Fnet)}\\ \\text{N}\\cdot ${num(s.dx / 1000, 5)}\\ \\text{m/rad}=${cn('torque', sig(u.T(s.T)))}\\ \\text{${u.tq}}`);
 
     H(10, `Inversion ${inv}: ${INV_TEXT[inv]}`);
-    N(`Fixing a different link does not change the <i>relative</i> motion of the chain — every inversion has the same θ, φ, x, v, a. What changes is which part you see standing still${inv === 3 ? '; with the rod fixed the quick-return effect appears because the uniform input is β = θ + φ, not θ' : ''}. Used in: ${INV_USE[inv]}.`);
+    N(`Fixing a different link does not change the <i>relative</i> motion of the chain — every inversion has the same θ, φ, x, v, a. What changes is which part you see standing still${beta ? '; with the rod fixed the quick-return effect appears because the uniform input is β = θ + φ, not θ' : ''}. Used in: ${INV_USE[inv]}.`);
     return items;
   }
 
@@ -832,9 +838,9 @@ ${body}
   function render(full) {
     if (!built || root.hidden) return;
     const p = params();
-    let sol = K.solve(p, st.inv, st.th, omegaOf(), load());
-    if (!sol) { st.th = 0; st.phase = 0; sol = K.solve(p, st.inv, 0, omegaOf(), load()); }
-    const m = K.metrics(p, st.inv);
+    let sol = K.solve(p, drv(), st.th, omegaOf(), load());
+    if (!sol) { st.th = 0; st.phase = 0; sol = K.solve(p, drv(), 0, omegaOf(), load()); }
+    const m = K.metrics(p, drv());
     $('simSvg').innerHTML = mechSvg(sol);
     drawGraph(sol);                                     // every frame, but only the dot and cursor move
     const now = performance.now();
@@ -861,13 +867,15 @@ ${body}
   function updatePills() {
     const pr = K.PRESETS[st.preset];
     $('pillInv').textContent = `${INV_NAME[st.inv]} inversion · ${INV_TEXT[st.inv]}`;
-    $('pillIn').textContent = `${INPUT_TEXT[st.inv]} · ${pr ? pr.hint : INV_USE[st.inv]}`;
+    $('pillIn').textContent = `${inputText()} · ${pr ? pr.hint : INV_USE[st.inv]}`;
     $('pillRun').textContent = st.playing ? '▶ Running — click or Space to pause' : '❚❚ Paused — click or Space to run · ← → step';
     $('btnPlay').textContent = st.playing ? '❚❚ Pause' : '▶ Run';
     $('btnShow').textContent = st.showGraph ? '▾ Hide' : '▴ Show';
   }
   function syncAll() {
     $('segInv').querySelectorAll('button').forEach((b) => b.classList.toggle('on', +b.dataset.inv === st.inv));
+    $('segIn2').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.in2 === st.in2));
+    $('segIn2').hidden = $('in2Lbl').hidden = st.inv !== 2;
     $('segGraph').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.g === st.graph));
     $('segUnits').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.u === st.units));
     $('presets').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.p === st.preset));
@@ -876,7 +884,7 @@ ${body}
   }
   /** something other than the animation changed */
   function changed(refit, soft) {
-    if (!soft) st.th = K.thetaFromPhase(params(), st.inv, st.phase, st.th);
+    if (!soft) st.th = K.thetaFromPhase(params(), drv(), st.phase, st.th);
     if (K.kin(params(), st.th) === null) { st.th = 0; st.phase = 0; }
     fitView(); syncAll(); saveLocal();
     render(true);
@@ -889,7 +897,7 @@ ${body}
     applySliderRanges();
     const need = K.minRod(st.r, st.e);
     if (st.l < need) st.l = need;
-    st.th = K.thetaFromPhase(params(), st.inv, st.phase, st.th);
+    st.th = K.thetaFromPhase(params(), drv(), st.phase, st.th);
     fitView(); syncAll(); render(true);
     root.focus();
   }

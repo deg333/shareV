@@ -91,17 +91,23 @@
     return { xt, xb, stroke, thT, thB, alpha: Math.abs(fwd - Math.PI), fwd, ret, ratio, N: l / r };
   }
 
+  /** Which angle turns uniformly? 'beta' (crank-to-rod angle at A) when the rod is fixed (inversion 3) or when, in the 2nd inversion,
+   *  the input is link 3 turning about A (Whitworth); otherwise theta. Returns the code the solver functions expect (3 = beta). */
+  const driveOf = (inv, in2) => (inv === 3 || (inv === 2 && in2 === 'link3') ? 3 : inv);
+
   /** Shortest rod that lets the crank turn all the way round. */
   const minRod = (r, e) => r + Math.abs(e) + 0.01;
 
   const PRESETS = {
     'IC Engine': { inv: 1, r: 40, l: 120, e: 0, rpm: 20, hint: 'IC engine, reciprocating compressor' },
     'Offset Engine': { inv: 1, r: 40, l: 120, e: 25, rpm: 20, hint: 'offset slider-crank: longer working stroke, quick return' },
-    'Quick Return': { inv: 3, r: 40, l: 85, e: 0, rpm: 20, hint: 'crank & slotted-lever quick-return mechanism' },
-    'Rotary Engine': { inv: 2, r: 40, l: 120, e: 0, rpm: 20, hint: 'Gnome rotary engine / Whitworth: crank fixed, cylinder rotates' },
+    // Whitworth quick return: crank (link 2) FIXED, the driving link 3 turns uniformly about A, the slotted link 1 turns about O2
+    'Quick Return': { inv: 2, in2: 'link3', r: 80, l: 143, e: 0, rpm: 15, hint: 'Whitworth quick-return mechanism' },
+    // Gnome rotary engine: crank fixed, the cylinder block (link 1) is what turns uniformly about O2
+    'Rotary Engine': { inv: 2, in2: 'link1', r: 40, l: 120, e: 0, rpm: 20, hint: 'Gnome rotary engine: crank fixed, cylinder rotates' },
     'Osc. Cylinder': { inv: 3, r: 40, l: 120, e: 0, rpm: 20, hint: 'oscillating cylinder engine' },
     'Hand Pump': { inv: 4, r: 40, l: 120, e: 0, rpm: 20, hint: 'hand pump / Bull engine: slider fixed' },
   };
 
-  return { kin, drive, solve, thetaFromPhase, metrics, minRod, PRESETS, TAU, mod };
+  return { kin, drive, solve, thetaFromPhase, metrics, minRod, driveOf, PRESETS, TAU, mod };
 }));

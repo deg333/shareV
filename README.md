@@ -158,3 +158,7 @@ its own structure in comments: a static fallback picture, a `<foreignObject>` ho
 (CSS, KaTeX, `sim-core.js`, `sim-export.js`, `sim.js`) inside a `<script type="text/html">` block that a few lines of bootstrap code hand to the iframe.
 Viewers that cannot run scripts (an `<img>` tag, Inkscape) show only the fallback picture. The exported source comes from `src/editor/sim-bundle.js`, which
 `tools/gen_tool_bundle.py` generates (`npm run gen`; `npm test` checks that it is up to date).
+
+**Quick Return preset = Whitworth (2nd inversion)**: crank r = 80 mm (3.15 in) fixed, rod l = 143 mm (5.63 in), 15 rpm, N = 1.79, time ratio 2.215.
+In the 2nd inversion an **INPUT** switch picks what turns uniformly: *link 3 · A* (Whitworth quick return, the preset) or *link 1 · O₂* (Gnome rotary engine).
+With link 3 turning about A the uniformly turning angle is β = θ + φ, so the time ratio is `(180° + 2α)/(180° − 2α)` with `sin α = r/l`.

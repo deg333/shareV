@@ -50,7 +50,7 @@
   /* For the 3rd inversion (rod fixed) the angle that turns uniformly is beta = theta + phi, so theta has to be found
      from beta by Newton's method.  For the other inversions theta itself turns uniformly. */
   function thetaFromPhase(phase, guess) {
-    if (CFG.inv !== 3) { return phase; }
+    if (!CFG.beta) { return phase; }
     var th = guess;
     th += Math.round((phase - th) / (2 * Math.PI)) * 2 * Math.PI;        // stay on the same revolution
     for (var i = 0; i < 40; i++) {
@@ -150,15 +150,15 @@
     }
 
     /* input arrow: an arc centred exactly on the pivot the input turns about (A when the rod is fixed, else O) */
-    var C = CFG.inv === 3 ? A : O, R = 30, ccw = CFG.inv !== 2;
-    var a1 = CFG.inv === 3 ? 55 : -125, a2 = CFG.inv === 3 ? 125 : -55;
+    var C = CFG.beta ? A : O, R = 30, ccw = CFG.inv !== 2;
+    var a1 = CFG.beta ? 55 : -125, a2 = CFG.beta ? 125 : -55;
     var pa = function (d) { return { x: C.x + R * Math.cos(d * D2R), y: C.y - R * Math.sin(d * D2R) }; };
     var s0 = ccw ? pa(a1) : pa(a2), s1 = ccw ? pa(a2) : pa(a1);
     el("input-arrow").setAttribute("d", "M " + s0.x.toFixed(1) + " " + s0.y.toFixed(1) + " A " + R + " " + R + " 0 0 " + (ccw ? 0 : 1) + " " + s1.x.toFixed(1) + " " + s1.y.toFixed(1));
 
     /* readouts: v = dx/dt = (dx/d theta) * theta-dot;  theta-dot = omega, except for the 3rd inversion where it is omega / (1 + phi') */
     var omega = 2 * Math.PI * state.rpm / 60 * state.dir;
-    var thd = CFG.inv === 3 ? omega / (1 + k.dphi) : omega;
+    var thd = CFG.beta ? omega / (1 + k.dphi) : omega;
     el("ro-theta").textContent = fmt(((th * R2D) % 360 + 360) % 360, 1) + "°";
     el("ro-phi").textContent = fmt(k.phi * R2D, 2) + "°";
     el("ro-x").textContent = fmt(k.x * CFG.k, 2) + " " + CFG.len;
@@ -247,7 +247,7 @@
     // control strip geometry (pixels)
     const sp = { x: 625, w: 140 }, sc = { x: 820, w: 140 };
     const cfg = {
-      r: c.r, l: c.l, e: c.e, inv: c.inv, rpm: c.rpm, theta0: c.theta, phase0: c.phase,
+      r: c.r, l: c.l, e: c.e, inv: c.inv, beta: !!c.beta, rpm: c.rpm, theta0: c.theta, phase0: c.phase,
       s: c.view.s, ox: c.view.ox, oy: c.view.oy, gl: c.gl, gr: c.gr, xb: c.xb, xt: c.xt, hasE: !!c.hasE,
       len, k, sp, sc,
     };
@@ -287,7 +287,8 @@
   THE EQUATIONS THE SCRIPT SOLVES (frame 1, angles counter-clockwise)
     sin(phi) = (r sin(theta) - e) / l        x = r cos(theta) + l cos(phi)
     v = dx/dt = -r omega sin(theta + phi) / cos(phi)
-    3rd inversion: beta = theta + phi turns uniformly, so theta is found from beta by Newton iteration.
+    When the input is the angle between crank and rod (3rd inversion, or Whitworth input in the 2nd), beta = theta + phi turns
+    uniformly, so theta is found from beta by Newton iteration.
 
   HOW THE FILE IS ORGANISED (top to bottom)
     <style>     colours and text styles for the labels
@@ -482,7 +483,7 @@ ${script.replace(/^\n/, '')}
       Object.assign(g, { e0: [q(O, 24), q(O, 60)], e1: [q(Oe, 24), q(Oe, 60)], dimE: [q(O, 52), q(Oe, 52)],
         tagE: { x: (q(O, 52).x + q(Oe, 52).x) / 2 + vx * 44, y: (q(O, 52).y + q(Oe, 52).y) / 2 + vy * 4 } });
     }
-    const C = c.inv === 3 ? A : O, R = 30, ccw = c.inv !== 2, a1 = c.inv === 3 ? 55 : -125, a2 = c.inv === 3 ? 125 : -55;
+    const C = c.beta ? A : O, R = 30, ccw = c.inv !== 2, a1 = c.beta ? 55 : -125, a2 = c.beta ? 125 : -55;
     const pa = (d) => ({ x: C.x + R * Math.cos(d * D2R), y: C.y - R * Math.sin(d * D2R) });
     const s0 = ccw ? pa(a1) : pa(a2), s1 = ccw ? pa(a2) : pa(a1);
     g.arrow = `M ${s0.x.toFixed(1)} ${s0.y.toFixed(1)} A ${R} ${R} 0 0 ${ccw ? 0 : 1} ${s1.x.toFixed(1)} ${s1.y.toFixed(1)}`;
@@ -502,7 +503,7 @@ ${script.replace(/^\n/, '')}
     let th = c.theta;
     for (let i = 0; i <= FRAMES; i++) {
       const phase = (i / FRAMES) * 2 * Math.PI;
-      th = K.thetaFromPhase({ r: c.r, l: c.l, e: c.e }, c.inv, phase, i === 0 ? phase : th);
+      th = K.thetaFromPhase({ r: c.r, l: c.l, e: c.e }, c.beta ? 3 : c.inv, phase, i === 0 ? phase : th);
       const g = geometry(c, K, th);
       frames.push(g || frames[frames.length - 1]);
     }

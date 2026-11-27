@@ -269,3 +269,4 @@ button.emojibtn img { width: 22px; height: 22px; display: block; }
 #sim .pc .good { background: #10241f; border-color: #1f6f5a; } #sim .pc .bad { background: #2a1a1d; border-color: #7a3040; }
 #sim .pc h4, #sim .pch { margin: 0 0 4px; font-size: 13.5px; } #sim .pch { margin-top: 12px; }
 @media (max-width: 1100px) { #sim .simmath { width: auto; } }
+#sim .seg[hidden], #sim .lbl[hidden] { display: none; }

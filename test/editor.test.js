@@ -560,7 +560,7 @@ const SHOT = process.env.SHOT; // optional screenshot path
   assert.ok(parsed.ids.includes('link-1-frame') && parsed.ids.includes('pins'), 'named groups: ' + parsed.ids.join(','));
   // animated, interactive SVG export: open it standalone (scripts run), check the motion and every control
   const fs = require('fs'), os = require('os');
-  for (const [preset, inv] of [['IC Engine', 1], ['Rotary Engine', 2], ['Quick Return', 3], ['Hand Pump', 4], ['Offset Engine', 1]]) {
+  for (const [preset, inv] of [['IC Engine', 1], ['Rotary Engine', 2], ['Quick Return', 2], ['Hand Pump', 4], ['Offset Engine', 1]]) {
     await page.click(`#presets [data-p="${preset}"]`);
     await page.evaluate(() => { window.__svgExport = null; });
     await page.click('#btnExportAnim');

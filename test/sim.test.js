@@ -95,4 +95,17 @@ for (const [name, pr] of Object.entries(S.PRESETS)) {
   assert.ok(pr.l >= S.minRod(pr.r, pr.e) - 0.02, `${name}: rod long enough to turn the crank round`);
   for (let t = 0; t < 360; t += 5) assert.ok(S.kin(pr, deg(t)), `${name} reachable at ${t}`);
 }
+// ---- Whitworth quick return preset (crank fixed, input = link 3 about A): matches the reference simulator
+{
+  const pr = S.PRESETS['Quick Return'];
+  assert.strictEqual(pr.inv, 2); assert.strictEqual(pr.in2, 'link3');
+  assert.strictEqual(S.driveOf(pr.inv, pr.in2), 3, 'beta (crank-to-rod angle) turns uniformly');
+  assert.strictEqual(S.driveOf(2, 'link1'), 2, 'rotary-engine input keeps theta uniform');
+  assert.strictEqual(S.driveOf(1, 'link3'), 1);
+  near(pr.l / pr.r, 1.79, 5e-3);                                   // N = 1.79
+  near(S.metrics(pr, S.driveOf(pr.inv, pr.in2)).ratio, 2.215, 1e-3); // time ratio 2.215
+  const s = S.solve(pr, 3, deg(295.7), 2 * Math.PI * pr.rpm / 60);
+  near((s.phi * 180) / Math.PI, -30.29, 1e-3);                      // phi at theta = 295.7 deg
+  near(s.x / 25.4, 6.23, 2e-3);                                      // X = 6.23 in
+}
 console.log('sim tests passed');
