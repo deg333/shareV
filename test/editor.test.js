@@ -633,6 +633,54 @@ const SHOT = process.env.SHOT; // optional screenshot path
     }
     await ap.close();
   }
+  // the WHOLE tool as one SVG: export it, open it stand-alone and drive it like the real thing
+  await page.click('#presets [data-p="Offset Engine"]');
+  await page.click('#segUnits [data-u="Imperial"]');
+  await page.evaluate(() => { window.__svgExport = null; });
+  await page.click('#btnExportTool');
+  await page.waitForFunction(() => window.__svgExport, null, { timeout: 20000 });
+  const whole = await page.evaluate(() => window.__svgExport);
+  assert.ok(whole.name.endsWith('whole-tool.svg'), 'whole tool file name');
+  assert.ok(whole.text.length > 400000, 'contains the whole application (' + whole.text.length + ' chars)');
+  for (const needle of ['THE WHOLE INTERACTIVE TOOL IN ONE SVG FILE', 'HOW THIS FILE IS BUILT', 'WHY AN IFRAME', 'id="tool-html"', 'window.__SIM_INITIAL', 'id="fallback"']) assert.ok(whole.text.includes(needle), 'whole tool contains ' + needle);
+  assert.ok((whole.text.match(/<!--/g) || []).length >= 12, 'commented');
+  const wfile = require('path').join(os.tmpdir(), 'sharev-whole-tool.svg');
+  fs.writeFileSync(wfile, whole.text);
+  const wp = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+  const werr = [];
+  wp.on('pageerror', (e) => werr.push(e.message));
+  wp.on('console', (m) => { if (m.type() === 'error') werr.push(m.text()); });
+  await wp.goto('file://' + wfile);
+  assert.strictEqual(await wp.evaluate(() => !!document.querySelector('parsererror')), false, 'the .svg is well-formed XML');
+  let tf = null;
+  for (let i = 0; i < 40 && !tf; i++) { tf = wp.frames().find((f) => f !== wp.mainFrame() && f.url() !== 'about:blank'); if (!tf) { tf = wp.frames().find((f) => f !== wp.mainFrame()); } if (tf && !(await tf.locator('#sim .simbar').count())) tf = null; if (!tf) await wp.waitForTimeout(150); }
+  assert.ok(tf, 'the tool starts inside the SVG');
+  assert.ok((await tf.locator('#pillInv').innerText()).includes('1st inversion'), 'starts in the exported inversion');
+  assert.strictEqual(await tf.locator('#segUnits .on').innerText(), 'Imperial', 'starts in the exported units');
+  assert.ok(Math.abs(parseFloat(await tf.inputValue('#sl_e')) - 25 / 25.4) < 0.01, 'starts with the exported offset');
+  assert.strictEqual(await tf.locator('#btnExportTool').isHidden(), true, 'no export-the-tool button inside the exported tool');
+  const trd = (await tf.locator('#readouts .rv').allInnerTexts());
+  assert.strictEqual(trd.length, 8, 'eight readout cards');
+  await tf.locator('#segInv [data-inv="3"]').click();
+  assert.ok((await tf.locator('#pillInv').innerText()).includes('link 3'), 'inversion buttons work');
+  await tf.locator('#presets [data-p="Hand Pump"]').click();
+  assert.ok((await tf.locator('#pillInv').innerText()).includes('4th'), 'presets work');
+  await tf.locator('#segGraph [data-g="v"]').click();
+  assert.ok((await tf.locator('#simGraph path').count()) >= 1, 'graphs work');
+  await tf.locator('#sl_r').evaluate((el) => { el.value = 1.2; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  assert.ok((await tf.locator('#val_r').innerText()).startsWith('1.20'), 'sliders work (in the exported units): ' + await tf.locator('#val_r').innerText());
+  assert.ok((await tf.locator('#mathBody .katex').count()) > 20, 'KaTeX equations render inside the SVG');
+  assert.ok(await tf.evaluate(() => document.fonts.check('16px KaTeX_Main')), 'the embedded KaTeX fonts load');
+  await tf.locator('.mtabs [data-mt="theory"]').click();
+  assert.ok((await tf.locator('#theoryBody').innerText()).includes('Grübler'), 'theory tab');
+  await tf.locator('#btnPlay').click();
+  const t0 = (await tf.locator('#readouts .rv').first().innerText());
+  await wp.waitForTimeout(500);
+  assert.notStrictEqual(await tf.locator('#readouts .rv').first().innerText(), t0, 'it animates');
+  await tf.locator('#btnPlay').click();
+  assert.deepStrictEqual(werr, [], 'no errors while running the whole tool from the SVG');
+  await wp.close();
+
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.click('#btnShow');
   assert.ok(await page.locator('#graphCard').isHidden());

@@ -7,7 +7,8 @@
     "dev": "tauri dev",
     "build": "tauri build --no-bundle",
     "bundle": "tauri build",
-    "test": "node test/calc.test.js && node test/sim.test.js && node test/editor.test.js"
+    "test": "python3 tools/gen_tool_bundle.py --check && node test/calc.test.js && node test/sim.test.js && node test/editor.test.js",
+    "gen": "python3 tools/gen_tool_bundle.py"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

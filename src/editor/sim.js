@@ -56,6 +56,9 @@
     const o = JSON.parse(localStorage.getItem(KEY) || 'null');
     if (o) for (const k of ['inv', 'graph', 'showGraph', 'units', 'r', 'l', 'e', 'rpm', 'F', 'm', 'preset']) if (o[k] !== undefined) st[k] = o[k];
   } catch { /* ignore */ }
+  // the "Whole tool SVG" export starts the stand-alone copy in the state it was exported from
+  if (window.__SIM_INITIAL) for (const k of ['inv', 'graph', 'showGraph', 'units', 'r', 'l', 'e', 'rpm', 'F', 'm', 'preset']) if (window.__SIM_INITIAL[k] !== undefined) st[k] = window.__SIM_INITIAL[k];
+  const STANDALONE = !!window.__SIM_INITIAL;
 
   // ------------------------------------------------------------------ DOM
   let built = false;
@@ -85,7 +88,7 @@
               <span class="lbl">UNITS</span><div class="seg" id="segUnits"><button data-u="SI">SI</button><button data-u="Imperial">Imperial</button></div></div>
             <div class="row"><span class="lbl">PRESETS</span><div class="presets" id="presets">${Object.keys(K.PRESETS).map((n) => `<button data-p="${n}">${n}</button>`).join('')}</div>
               <button id="btnPlay" class="play">▶ Run</button><button id="btnStepB" title="Step back">⏮</button><button id="btnStepF" title="Step forward">⏭</button>
-              <button id="btnExport" class="export" title="Save this frame as a clean, heavily commented SVG file">⇩ Export SVG</button><button id="btnExportAnim" class="export" title="Save an animated SVG with play/pause, direction, speed and angle controls (open it in a browser)">⇩ Animated SVG</button><button id="btnExportSmil" class="export" title="Save a looping animated SVG that needs no script (plays in img tags and many viewers; no controls)">⇩ No-script SVG</button></div>
+              <button id="btnExport" class="export" title="Save this frame as a clean, heavily commented SVG file">⇩ Export SVG</button><button id="btnExportAnim" class="export" title="Save an animated SVG with play/pause, direction, speed and angle controls (open it in a browser)">⇩ Animated SVG</button><button id="btnExportSmil" class="export" title="Save a looping animated SVG that needs no script (plays in img tags and many viewers; no controls)">⇩ No-script SVG</button><button id="btnExportTool" class="export" title="Save this whole interactive simulator as ONE svg file (open it in a browser)">⇩ Whole tool SVG</button></div>
           </div>
           <div class="card sliders" id="sliders">${sliders.map((s) => `
             <div class="sl ${s.color}"><span class="chip">${s.chip}</span><span class="nm">${s.label}${s.sym ? ` <i>${s.sym}</i>` : ''}</span>
@@ -140,6 +143,8 @@
     $('btnExport').onclick = doExport;
     $('btnExportAnim').onclick = doExportAnimated;
     $('btnExportSmil').onclick = doExportSmil;
+    $('btnExportTool').onclick = doExportTool;
+    if (STANDALONE) $('btnExportTool').hidden = true; // this already IS the exported tool
     root.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && b.id !== 'simClose') b.blur(); }); // keep Space = run/pause after clicking any button
     root.querySelector('.mtabs').onclick = (e) => {
       const b = e.target.closest('button');
@@ -504,6 +509,41 @@ ${body}
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       toast('Exported ' + name);
     }
+  }
+  /** The whole simulator as ONE svg file (see tool-export.js). The source text comes from sim-bundle.js, loaded on demand. */
+  function loadBundle() {
+    if (window.SIM_BUNDLE) return Promise.resolve(window.SIM_BUNDLE);
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'sim-bundle.js';
+      s.onload = () => (window.SIM_BUNDLE ? resolve(window.SIM_BUNDLE) : reject(new Error('sim-bundle.js did not define SIM_BUNDLE')));
+      s.onerror = () => reject(new Error('could not load sim-bundle.js'));
+      document.head.appendChild(s);
+    });
+  }
+  async function doExportTool() {
+    try {
+      toast('Building the whole tool…');
+      const bundle = await loadBundle();
+      const p = params(), u = un();
+      const sol = K.solve(p, st.inv, st.th, omegaOf(), load());
+      if (!sol || !window.ToolExport) return;
+      const init = { inv: st.inv, graph: st.graph, showGraph: st.showGraph, units: st.units, r: st.r, l: st.l, e: st.e, rpm: st.rpm, F: st.F, m: st.m, preset: st.preset };
+      const text = window.ToolExport.build(bundle, init, `<style>${SVG_CSS}</style>` + mechSvg(sol), {
+        date: new Date().toISOString().slice(0, 10), invName: INV_NAME[st.inv],
+        params: `r = ${num(u.L(p.r), 2)} ${u.len}, l = ${num(u.L(p.l), 2)} ${u.len}, e = ${num(u.L(p.e), 2)} ${u.len}, ${st.rpm} rpm`,
+      });
+      const name = 'crank-slider-simulator_whole-tool.svg';
+      const done = (where) => toast(where ? `Saved ${where} — open it in a browser` : 'Export cancelled');
+      if (window.api && window.api.saveFile) await window.api.saveFile(name, 'svg', 'SVG image', text).then(done);
+      else {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+        a.download = name; a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        toast('Exported ' + name);
+      }
+    } catch (e) { toast('Export failed: ' + (e && e.message || e)); }
   }
   function doExportAnimated() {
     const text = exportAnimated();

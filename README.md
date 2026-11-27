@@ -150,3 +150,11 @@ plays inside an `<img>` tag, as a CSS background, in many viewers and in e-mail.
 part carries the list of its 121 values (parts that never move, e.g. the whole frame in the 1st inversion, stay plain attributes). It has no buttons;
 a dot travelling along a track shows the crank angle, and one revolution takes `dur="…"` (the exported rpm limited to 2–12 s; replace that string to
 change the speed). Verified frame-for-frame against the interactive version in all four inversions.
+
+**Whole tool as one SVG** (Simulator → *⇩ Whole tool SVG*): saves the *entire* interactive simulator — four inversions, presets, all sliders, units, the animated
+mechanism, the four graphs, the readouts, the KaTeX-typeset maths, the Theory and Pros & cons tabs and its own export buttons — as a single `.svg` of about 600 KB.
+Open it directly in a browser and it starts in the state you exported. Nothing is loaded from the network and no other files are needed. The file explains
+its own structure in comments: a static fallback picture, a `<foreignObject>` holding an `<iframe>`, and the application stored as plain, readable text
+(CSS, KaTeX, `sim-core.js`, `sim-export.js`, `sim.js`) inside a `<script type="text/html">` block that a few lines of bootstrap code hand to the iframe.
+Viewers that cannot run scripts (an `<img>` tag, Inkscape) show only the fallback picture. The exported source comes from `src/editor/sim-bundle.js`, which
+`tools/gen_tool_bundle.py` generates (`npm run gen`; `npm test` checks that it is up to date).
