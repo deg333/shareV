@@ -437,5 +437,257 @@ ${script.replace(/^\n/, '')}
 `;
   }
 
-  return { animatedSvg, SCRIPT, W, H, PANEL };
+
+  // ================================================================================================================
+  // NO-SCRIPT VERSION: a looping SMIL animation (no JavaScript, so it also plays inside <img>, in many viewers and in e-mail).
+  // The motion is sampled at FRAMES crank positions; every moving attribute gets an <animate> with that list of values.
+  // ================================================================================================================
+  const FRAMES = 120;                                     // keyframes per revolution (3 degrees apart)
+
+  /** Positions of every part (screen pixels) at crank angle th - the same geometry the interactive script computes. */
+  function geometry(c, K, th) {
+    const p = { r: c.r, l: c.l, e: c.e };
+    const k = K.kin(p, th);
+    if (!k) return null;
+    const D2R = Math.PI / 180;
+    let f = (q) => q, rot = 0;
+    if (c.inv === 2) { const a = 20 * D2R - th, cs = Math.cos(a), sn = Math.sin(a); rot = a; f = (q) => ({ x: q.x * cs - q.y * sn, y: q.x * sn + q.y * cs }); }
+    else if (c.inv === 3) {
+      const A0 = { x: c.r * Math.cos(th), y: c.r * Math.sin(th) }, cs = Math.cos(k.phi), sn = Math.sin(k.phi); rot = k.phi;
+      f = (q) => { const dx = q.x - A0.x, dy = q.y - A0.y; return { x: -c.l / 2 + dx * cs - dy * sn, y: dx * sn + dy * cs }; };
+    } else if (c.inv === 4) f = (q) => ({ x: q.x - k.x, y: q.y - c.e });
+    const px = (q) => ({ x: c.view.ox + q.x * c.view.s, y: c.view.oy - q.y * c.view.s });
+    const O = px(f({ x: 0, y: 0 })), A = px(f({ x: c.r * Math.cos(th), y: c.r * Math.sin(th) })), B = px(f({ x: k.x, y: c.e })), Oe = px(f({ x: 0, y: c.e }));
+    const G0 = px(f({ x: c.gl, y: c.e })), G1 = px(f({ x: c.gr, y: c.e })), Tb = px(f({ x: c.xb, y: c.e })), Tt = px(f({ x: c.xt, y: c.e }));
+    const dl = Math.hypot(G1.x - G0.x, G1.y - G0.y) || 1, ux = (G1.x - G0.x) / dl, uy = (G1.y - G0.y) / dl;
+    const R2D = 180 / Math.PI;
+    const ang = Math.atan2(B.y - A.y, B.x - A.x) * R2D, ca = Math.atan2(A.y - O.y, A.x - O.x) * R2D;
+    const g = {
+      th, k, O, A, B, Oe, G0, G1, Tb, Tt, rotDeg: -rot * R2D,
+      grooveA: { x: Tb.x - ux * 22, y: Tb.y - uy * 22 }, grooveB: { x: Tt.x + ux * 22, y: Tt.y + uy * 22 },
+      frameLbl: { x: G1.x - ux * 2, y: G1.y + 4 },
+      rodLbl: { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 + 4, a: ang > 90 || ang < -90 ? ang + 180 : ang },
+      crankLbl: { x: (O.x + A.x) / 2, y: (O.y + A.y) / 2 + 4, a: ca > 90 || ca < -90 ? ca + 180 : ca },
+      tagO: { x: O.x - 26, y: O.y + 24 }, tagA: c.inv === 3 ? { x: A.x + 6, y: A.y + 28 } : { x: A.x, y: A.y - 24 }, tagB: { x: B.x + 22, y: B.y + 30 },
+    };
+    if (c.inv !== 3) {
+      const nx = Tt.y - Tb.y, ny = -(Tt.x - Tb.x), nl = Math.hypot(nx, ny) || 1;
+      const off = (q, d) => ({ x: q.x + nx / nl * d, y: q.y + ny / nl * d });
+      Object.assign(g, { extB: [off(Tb, -26), off(Tb, -66)], extT: [off(Tt, -26), off(Tt, -66)], dimS: [off(Tb, -56), off(Tt, -56)],
+        lblB: off(Tb, -80), lblT: off(Tt, -80), tagS: off({ x: (Tb.x + Tt.x) / 2, y: (Tb.y + Tt.y) / 2 }, -56) });
+    }
+    if (c.hasE) {
+      const sx = px(f({ x: -1, y: 0 })), mx = sx.x - O.x, my = sx.y - O.y, ml = Math.hypot(mx, my) || 1, vx = mx / ml, vy = my / ml;
+      const q = (p0, d) => ({ x: p0.x + vx * d, y: p0.y + vy * d });
+      Object.assign(g, { e0: [q(O, 24), q(O, 60)], e1: [q(Oe, 24), q(Oe, 60)], dimE: [q(O, 52), q(Oe, 52)],
+        tagE: { x: (q(O, 52).x + q(Oe, 52).x) / 2 + vx * 44, y: (q(O, 52).y + q(Oe, 52).y) / 2 + vy * 4 } });
+    }
+    const C = c.inv === 3 ? A : O, R = 30, ccw = c.inv !== 2, a1 = c.inv === 3 ? 55 : -125, a2 = c.inv === 3 ? 125 : -55;
+    const pa = (d) => ({ x: C.x + R * Math.cos(d * D2R), y: C.y - R * Math.sin(d * D2R) });
+    const s0 = ccw ? pa(a1) : pa(a2), s1 = ccw ? pa(a2) : pa(a1);
+    g.arrow = `M ${s0.x.toFixed(1)} ${s0.y.toFixed(1)} A ${R} ${R} 0 0 ${ccw ? 0 : 1} ${s1.x.toFixed(1)} ${s1.y.toFixed(1)}`;
+    return g;
+  }
+
+  /** @param c  same configuration as animatedSvg plus K (the SimCore solver) */
+  function smilSvg(c, K) {
+    const n1 = (v) => (Math.abs(v) < 0.05 ? 0 : v).toFixed(1);
+    const num = (v, d = 2) => (Math.abs(v) < 0.5 * Math.pow(10, -d) ? 0 : v).toFixed(d);
+    const len = c.units.len, k = c.units.k, t = c.texts;
+    const dur = Math.max(2, Math.min(12, 60 / c.rpm));                // seconds per revolution (clamped to something watchable)
+    const D = `${dur}s`;
+
+    // sample one revolution of the uniformly turning input angle (beta for the 3rd inversion, theta otherwise)
+    const frames = [];
+    let th = c.theta;
+    for (let i = 0; i <= FRAMES; i++) {
+      const phase = (i / FRAMES) * 2 * Math.PI;
+      th = K.thetaFromPhase({ r: c.r, l: c.l, e: c.e }, c.inv, phase, i === 0 ? phase : th);
+      const g = geometry(c, K, th);
+      frames.push(g || frames[frames.length - 1]);
+    }
+
+    /* ---- tiny builders: a value that never changes is written as a plain attribute, otherwise as <animate> ---- */
+    const same = (vals) => vals.every((v) => v === vals[0]);
+    const anim = (name, vals, extra = '') => `<animate attributeName="${name}" values="${vals.join(';')}" dur="${D}" repeatCount="indefinite"${extra}/>`;
+    /** <line> whose two end points come from pick(g) = [p, q] */
+    const lineEl = (id, style, pick) => {
+      const pts = frames.map(pick);
+      const names = [['x1', (a) => n1(a[0].x)], ['y1', (a) => n1(a[0].y)], ['x2', (a) => n1(a[1].x)], ['y2', (a) => n1(a[1].y)]];
+      let at = '', kids = '';
+      for (const [nm, fn] of names) { const v = pts.map(fn); if (same(v)) at += ` ${nm}="${v[0]}"`; else kids += `\n      ${anim(nm, v)}`; }
+      return kids ? `<line id="${id}"${at} ${style}>${kids}\n    </line>` : `<line id="${id}"${at} ${style}/>`;
+    };
+    /** <g> positioned with translate(pick(g)), optional rotation list rot(g) (degrees) for labels / the slider block */
+    const moveEl = (id, cls, inner, pick, rot, rotDiscrete) => {
+      const pts = frames.map(pick), first = pts[0];
+      const rots = rot ? frames.map(rot) : null;
+      const posSame = same(pts.map((p) => `${n1(p.x)} ${n1(p.y)}`)), rotSame = !rots || same(rots.map((a) => a.toFixed(1)));
+      let tr = '', kids = '';
+      if (posSame && rotSame) tr = ` transform="translate(${n1(first.x)} ${n1(first.y)})${rots ? ` rotate(${rots[0].toFixed(1)})` : ''}"`;
+      else {
+        if (!posSame) kids += `\n      <animateTransform attributeName="transform" type="translate" values="${pts.map((p) => `${n1(p.x)} ${n1(p.y)}`).join(';')}" dur="${D}" repeatCount="indefinite"/>`;
+        else tr = ` transform="translate(${n1(first.x)} ${n1(first.y)})"`;
+        if (rots && !rotSame) kids += `\n      <animateTransform attributeName="transform" type="rotate" values="${rots.map((a) => a.toFixed(1)).join(';')}" additive="sum" dur="${D}" repeatCount="indefinite"${rotDiscrete ? ' calcMode="discrete"' : ''}/>`;
+        else if (rots) tr = tr.replace(')"', `) rotate(${rots[0].toFixed(1)})"`);
+      }
+      if (rots && rotSame && !posSame && Math.abs(rots[0]) > 0.05) inner = `<g transform="rotate(${rots[0].toFixed(1)})">${inner}</g>`; // constant rotation, moving position
+      return `<g id="${id}"${cls ? ` class="${cls}"` : ''}${tr}>${kids}\n      ${inner}\n    </g>`;
+    };
+    const textMove = (id, cls, text, pick, rot) => {
+      const e = moveEl(id, '', `<text class="${cls}" text-anchor="middle">${text}</text>`, pick, rot, true);
+      return e;
+    };
+    const tag = (id, text, cls, pick) => moveEl(id, `tag ${cls}`, `<rect x="${-(text.length * 3.6 + 7)}" y="-10" width="${text.length * 7.2 + 14}" height="20" rx="5"/><text text-anchor="middle" y="4.5">${text}</text>`, pick);
+    const pin = (id, r, pick) => moveEl(id, '', `<circle r="${r}" fill="#e9edf4" stroke="#3b4252" stroke-width="2"/><circle r="${r - 4}" fill="#566073"/>`, pick);
+    const bar = (id, w, col, dark, pick) => `${lineEl(id + '-outline', `stroke="${dark}" stroke-width="${w + 4}" stroke-linecap="round"`, pick)}\n    ${lineEl(id + '-fill', `stroke="${col}" stroke-width="${w}" stroke-linecap="round"`, pick)}`;
+    const pathEl = (id, style, get) => { const v = frames.map(get); return same(v) ? `<path id="${id}" d="${v[0]}" ${style}/>` : `<path id="${id}" d="${v[0]}" ${style}>\n      ${anim('d', v)}\n    </path>`; };
+
+    const hasStroke = c.inv !== 3;
+    const frameBlock = `
+  <!-- LINK 1 - FRAME / GUIDE: one rigid grey body (a dark outline stroke under a light fill stroke, so the pieces merge). -->
+  <g id="frame">
+    ${lineEl('frame-bar-outline', 'stroke="#454c5b" stroke-width="38" stroke-linecap="round"', (g) => [g.G0, g.G1])}
+    ${lineEl('frame-conn-outline', 'stroke="#454c5b" stroke-width="38" stroke-linecap="round"', (g) => [g.O, g.Oe])}
+    ${moveEl('frame-boss-outline', '', `<circle r="21" fill="#454c5b"/>`, (g) => g.O)}
+    ${lineEl('frame-bar-fill', 'stroke="#b8bdc8" stroke-width="34" stroke-linecap="round"', (g) => [g.G0, g.G1])}
+    ${lineEl('frame-conn-fill', 'stroke="#b8bdc8" stroke-width="34" stroke-linecap="round"', (g) => [g.O, g.Oe])}
+    ${moveEl('frame-boss-fill', '', `<circle r="19" fill="#b8bdc8"/>`, (g) => g.O)}
+    ${lineEl('frame-groove', 'stroke="#2f3541" stroke-width="10" stroke-linecap="round"', (g) => [g.grooveA, g.grooveB])}
+    ${textMove('frame-label', 'linklbl small', '1', (g) => g.frameLbl)}
+  </g>`;
+    const dims = hasStroke ? `
+  <!-- STROKE DIMENSION: extension lines at the dead centres and a dimension line between them. -->
+  <g class="dc">
+    ${lineEl('ext-bdc', '', (g) => g.extB)}
+    ${lineEl('ext-tdc', '', (g) => g.extT)}
+    ${lineEl('dim-stroke', 'marker-start="url(#arr)" marker-end="url(#arr)"', (g) => g.dimS)}
+    ${moveEl('lbl-bdc', '', '<text text-anchor="middle">BDC</text>', (g) => g.lblB)}
+    ${moveEl('lbl-tdc', '', '<text text-anchor="middle">TDC</text>', (g) => g.lblT)}
+  </g>
+  ${tag('tag-stroke', `stroke = ${num(c.metrics.stroke * k, 1)} ${len}`, 'dim', (g) => g.tagS)}` : '\n  <!-- (no stroke dimension in the 3rd inversion) -->';
+    const dimE = c.hasE ? `
+  <!-- OFFSET DIMENSION e -->
+  <g class="dc e">
+    ${lineEl('ext-e0', '', (g) => g.e0)}
+    ${lineEl('ext-e1', '', (g) => g.e1)}
+    ${lineEl('dim-e', 'marker-start="url(#arrE)" marker-end="url(#arrE)"', (g) => g.dimE)}
+  </g>
+  ${tag('tag-e', `e ${num(c.e * k, 2)} ${len}`, 'edim', (g) => g.tagE)}` : '';
+
+    // progress marker along the bottom: shows where in the revolution the crank is
+    const pb = { x: 60, w: 220, y: H - 26 };
+    const progress = `
+  <!-- PROGRESS: the dot travels along this track once per revolution of the input -->
+  <text class="ctl-text" x="${pb.x}" y="${pb.y - 12}">crank angle</text>
+  <rect x="${pb.x}" y="${pb.y - 3}" width="${pb.w}" height="6" rx="3" fill="#2c3850"/>
+  ${[0, 90, 180, 270, 360].map((d) => `<text class="deg" x="${pb.x + d / 360 * pb.w}" y="${pb.y + 18}" text-anchor="middle">${d}°</text>`).join('')}
+  <circle cx="${pb.x}" cy="${pb.y}" r="8" fill="#35d0b8" stroke="#fff" stroke-width="2">
+    <animate attributeName="cx" values="${pb.x};${pb.x + pb.w}" dur="${D}" repeatCount="indefinite"/>
+  </circle>`;
+
+    const sliderBlock = moveEl('slider', '', `<rect x="-22" y="-15" width="44" height="30" rx="5" fill="#d3a92f" stroke="#6b5412" stroke-width="2.5"/><rect x="-16" y="-9" width="32" height="18" rx="3" fill="#e8c65a" opacity=".55"/>`, (g) => g.B, (g) => g.rotDeg, false);
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ===========================================================================================
+  CRANK & SLIDER MECHANISM  -  LOOPING ANIMATION, NO SCRIPT  -  exported from ShareV on ${t.date}
+  ===========================================================================================
+
+  This file contains NO JavaScript.  The motion is a SMIL animation, so it also plays when the file is used as an
+  <img>, as a CSS background, in many viewers and in e-mail.  It cannot have buttons or sliders: for those use ShareV's
+  "Animated SVG" export (which needs a browser that runs SVG scripts).
+
+  HOW THE ANIMATION WORKS
+    The linkage was solved once per ${360 / FRAMES} degrees of crank rotation (${FRAMES} positions + the first one again to close the loop).
+    Every part that moves has an <animate> (or <animateTransform>) with the list of its ${FRAMES + 1} values, played over
+    ONE revolution and repeated forever; the browser blends smoothly between the values.
+    A value that never changes (for example the whole frame in the 1st inversion) is written as an ordinary attribute.
+      - one revolution takes   dur="${D}"   (the input speed in ShareV was ${c.rpm} rpm, limited to 2 - 12 s so it is watchable)
+        TO CHANGE THE SPEED: search for  dur="${D}"  and replace every occurrence with another time.
+      - the rotation of the text labels uses calcMode="discrete" so they never spin through 180 degrees when they flip.
+
+  WHAT YOU ARE LOOKING AT
+    A slider-crank chain: link 1 frame/guide (grey), link 2 crank (teal), link 3 connecting rod (purple), link 4 slider (gold).
+    This is the ${t.invName} inversion: ${t.invText}.  (${t.invUse})
+    r = ${num(c.r * k, 3)} ${len}   l = ${num(c.l * k, 3)} ${len}   e = ${num(c.e * k, 3)} ${len}
+    stroke = ${num(c.metrics.stroke * k, 3)} ${len}    N = l/r = ${num(c.metrics.N, 3)}    time ratio = ${num(c.metrics.ratio, 4)}
+
+  THE EQUATIONS BEHIND THE KEYFRAMES (frame 1, angles counter-clockwise)
+    sin(phi) = (r sin(theta) - e) / l        x = r cos(theta) + l cos(phi)
+    3rd inversion: the angle that turns uniformly is beta = theta + phi, so theta is found from beta by Newton iteration.
+
+  HOW THE FILE IS ORGANISED
+    <style>, <defs>   colours, arrow heads, grid pattern
+    background        panel and grid
+    moving parts      frame (link 1), dimensions, crank, rod, slider, pins, labels, input arrow - each with its animations
+    progress          a dot that runs along a track once per revolution
+  ===========================================================================================
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <title>Crank and slider mechanism - ${t.invName} inversion (looping animation, no script)</title>
+  <desc>Slider-crank chain animated with SMIL, no scripting. r = ${num(c.r * k, 2)} ${len}, l = ${num(c.l * k, 2)} ${len}, e = ${num(c.e * k, 2)} ${len}.</desc>
+
+  <style>
+    text        { font-family: "Segoe UI", Arial, sans-serif; }
+    .deg        { fill: #8e9bb3; font-size: 11px; }
+    .dc line    { stroke: #c2551c; stroke-width: 1.5; }
+    .dc text    { fill: #e26b2a; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+    .dc.e line  { stroke: #2ea898; }
+    .tag rect   { fill: #1d2538; stroke: #36456a; }
+    .tag text   { fill: #e8eefb; font-size: 12px; font-weight: 700; }
+    .tag.dim rect  { fill: #2a1d18; stroke: #7a3a1c; }  .tag.dim text  { fill: #ffb98a; }
+    .tag.edim rect { fill: #14302c; stroke: #2ea898; }  .tag.edim text { fill: #8fe3d4; }
+    .linklbl    { fill: #fff; font-size: 13px; font-weight: 700; paint-order: stroke; stroke: rgba(0,0,0,.35); stroke-width: 2px; }
+    .linklbl.small { font-size: 11px; }
+    .ctl-text   { fill: #cfd8ea; font-size: 12px; }
+  </style>
+
+  <defs>
+    <!-- arrow heads: refX is the TIP so the tip lands exactly on the end of the line -->
+    <marker id="arr" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="#c2551c"/></marker>
+    <marker id="arrE" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="#2ea898"/></marker>
+    <marker id="arrT" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M0 0L8 4L0 8z" fill="#2ea898"/></marker>
+    <pattern id="gridS" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#3a4558" stroke-width=".6"/></pattern>
+    <pattern id="gridL" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#gridS)"/><path d="M100 0H0V100" fill="none" stroke="#4a5870" stroke-width="1"/></pattern>
+  </defs>
+
+  <!-- BACKGROUND -->
+  <rect width="${W}" height="${H}" rx="14" fill="#1b2231"/>
+  <rect width="${W}" height="${H}" rx="14" fill="url(#gridL)"/>
+${c.protractor ? `
+  <!-- PROTRACTOR (1st inversion): the angle scale belongs to the guide, so it never moves. -->
+  <g id="protractor">
+    ${c.protractor}
+  </g>
+` : ''}${frameBlock}
+${dims}${dimE}
+
+  <!-- LINK 2 - CRANK (teal) and LINK 3 - CONNECTING ROD (purple) -->
+  ${bar('crank', 18, '#2ea898', '#17594f', (g) => [g.O, g.A])}
+  ${bar('rod', 16, '#8f64d8', '#47306f', (g) => [g.A, g.B])}
+
+  <!-- LINK 4 - SLIDER BLOCK (gold): translated onto B and rotated with the guide -->
+  ${sliderBlock}
+
+  <!-- PIN JOINTS -->
+  ${pin('pin-O', 9, (g) => g.O)}
+  ${pin('pin-A', 7, (g) => g.A)}
+  ${pin('pin-B', 7, (g) => g.B)}
+
+  <!-- LABELS (lengths along the bars; small tags on the pivots) -->
+  ${moveEl('rod-label', '', `<text class="linklbl" text-anchor="middle">3 · l ${num(c.l * k, 1)} ${len}</text>`, (g) => ({ x: g.rodLbl.x, y: g.rodLbl.y }), (g) => g.rodLbl.a, true)}
+  ${moveEl('crank-label', '', `<text class="linklbl small" text-anchor="middle">2 · r ${num(c.r * k, 1)}</text>`, (g) => ({ x: g.crankLbl.x, y: g.crankLbl.y }), (g) => g.crankLbl.a, true)}
+  ${tag('tag-O', 'O₂', '', (g) => g.tagO)}
+  ${tag('tag-A', 'A', '', (g) => g.tagA)}
+  ${tag('tag-B', 'B', '', (g) => g.tagB)}
+
+  <!-- INPUT ARROW: an arc centred exactly on the pivot the input turns about -->
+  ${pathEl('input-arrow', 'fill="none" stroke="#2ea898" stroke-width="2.6" marker-end="url(#arrT)"', (g) => g.arrow)}
+${progress}
+</svg>
+`;
+  }
+
+  return { animatedSvg, smilSvg, geometry, SCRIPT, W, H, PANEL, FRAMES };
 }));

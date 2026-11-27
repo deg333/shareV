@@ -85,7 +85,7 @@
               <span class="lbl">UNITS</span><div class="seg" id="segUnits"><button data-u="SI">SI</button><button data-u="Imperial">Imperial</button></div></div>
             <div class="row"><span class="lbl">PRESETS</span><div class="presets" id="presets">${Object.keys(K.PRESETS).map((n) => `<button data-p="${n}">${n}</button>`).join('')}</div>
               <button id="btnPlay" class="play">▶ Run</button><button id="btnStepB" title="Step back">⏮</button><button id="btnStepF" title="Step forward">⏭</button>
-              <button id="btnExport" class="export" title="Save this frame as a clean, heavily commented SVG file">⇩ Export SVG</button><button id="btnExportAnim" class="export" title="Save an animated SVG with play/pause, direction, speed and angle controls (open it in a browser)">⇩ Animated SVG</button></div>
+              <button id="btnExport" class="export" title="Save this frame as a clean, heavily commented SVG file">⇩ Export SVG</button><button id="btnExportAnim" class="export" title="Save an animated SVG with play/pause, direction, speed and angle controls (open it in a browser)">⇩ Animated SVG</button><button id="btnExportSmil" class="export" title="Save a looping animated SVG that needs no script (plays in img tags and many viewers; no controls)">⇩ No-script SVG</button></div>
           </div>
           <div class="card sliders" id="sliders">${sliders.map((s) => `
             <div class="sl ${s.color}"><span class="chip">${s.chip}</span><span class="nm">${s.label}${s.sym ? ` <i>${s.sym}</i>` : ''}</span>
@@ -139,6 +139,7 @@
     });
     $('btnExport').onclick = doExport;
     $('btnExportAnim').onclick = doExportAnimated;
+    $('btnExportSmil').onclick = doExportSmil;
     root.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && b.id !== 'simClose') b.blur(); }); // keep Space = run/pause after clicking any button
     root.querySelector('.mtabs').onclick = (e) => {
       const b = e.target.closest('button');
@@ -474,6 +475,35 @@ ${body}
       units: { len: u.len, k: u.L(1) }, protractor: prot ? prot.svg.replace(/></g, '>\n    <') : '', metrics: m,
       texts: { date: new Date().toISOString().slice(0, 10), invName: INV_NAME[st.inv], invText: INV_TEXT[st.inv], invUse: INV_USE[st.inv] },
     });
+  }
+  /** looping SMIL animation without any script (plays inside <img>, many viewers and e-mail) */
+  function exportSmil() {
+    const p = params(), u = un(), m = K.metrics(p, st.inv);
+    const sol = K.solve(p, st.inv, st.th, omegaOf(), load());
+    if (!sol || !window.SimExport) return '';
+    const gp = 0.3 * p.r + 14;
+    const { secs, hasE } = mechSections(sol);
+    const prot = secs.find((x) => x.id === 'protractor');
+    return window.SimExport.smilSvg({
+      r: p.r, l: p.l, e: p.e, inv: st.inv, rpm: st.rpm, theta: st.th, phase: st.phase,
+      view: { s: view.s, ox: view.ox, oy: view.oy }, gl: Math.min(0, m.xb - gp), gr: m.xt + gp, xb: m.xb, xt: m.xt, hasE,
+      units: { len: u.len, k: u.L(1) }, protractor: prot ? prot.svg.replace(/></g, '>\n    <') : '', metrics: m,
+      texts: { date: new Date().toISOString().slice(0, 10), invName: INV_NAME[st.inv], invText: INV_TEXT[st.inv], invUse: INV_USE[st.inv] },
+    }, K);
+  }
+  function doExportSmil() {
+    const text = exportSmil();
+    if (!text) return;
+    const name = exportName().replace(/\.svg$/, '_loop-no-script.svg');
+    const done = (where) => toast(where ? `Saved ${where} — a looping animation with no script` : 'Export cancelled');
+    if (window.api && window.api.saveFile) window.api.saveFile(name, 'svg', 'SVG image', text).then(done).catch((e) => toast('Export failed: ' + (e && e.message || e)));
+    else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+      a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast('Exported ' + name);
+    }
   }
   function doExportAnimated() {
     const text = exportAnimated();

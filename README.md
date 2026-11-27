@@ -144,3 +144,9 @@ offset…). Open it in a browser and it plays by itself, with controls drawn int
 a header explaining the controls, the equations and the file layout; every moving part is a named element; and a short, readable script
 (kinematics → inversion transform → move the elements → animation loop → control handlers) drives it. Browsers run the script when the
 file is opened directly; viewers that block SVG scripts (`<img>`, editors) show the exported still frame — use the plain *Export SVG* there.
+
+**No-script animated SVG** (Simulator → *⇩ No-script SVG*): a looping animation built from SMIL `<animate>` elements — no JavaScript at all — so it also
+plays inside an `<img>` tag, as a CSS background, in many viewers and in e-mail. The linkage is sampled every 3° of crank rotation and every moving
+part carries the list of its 121 values (parts that never move, e.g. the whole frame in the 1st inversion, stay plain attributes). It has no buttons;
+a dot travelling along a track shows the crank angle, and one revolution takes `dur="…"` (the exported rpm limited to 2–12 s; replace that string to
+change the speed). Verified frame-for-frame against the interactive version in all four inversions.

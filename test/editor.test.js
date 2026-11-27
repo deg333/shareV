@@ -594,6 +594,43 @@ const SHOT = process.env.SHOT; // optional screenshot path
     await ap.keyboard.press('Space');
     assert.ok(await ap.locator('#icon-play').getAttribute('display') !== 'none', 'Space pauses (play icon shown)');
     assert.deepStrictEqual(aerr, [], 'no script errors in the exported file');
+
+    // ---- the NO-SCRIPT export: no <script>, well-formed, loops by itself, and matches the interactive file frame for frame
+    await page.evaluate(() => { window.__svgExport = null; });
+    await page.click('#btnExportSmil');
+    await page.waitForFunction(() => window.__svgExport);
+    const smil = await page.evaluate(() => window.__svgExport);
+    assert.ok(smil.name.endsWith('_loop-no-script.svg'), 'no-script file name');
+    assert.ok(!/<script/i.test(smil.text) && !/\son[a-z]+=/i.test(smil.text), 'contains no script of any kind');
+    assert.ok(smil.text.includes('NO JAVASCRIPT') || smil.text.includes('NO SCRIPT'), 'explains itself');
+    assert.ok((smil.text.match(/<animate/g) || []).length >= 8 && (smil.text.match(/<!--/g) || []).length >= 8, 'animated and commented');
+    const sfile = require('path').join(os.tmpdir(), 'sharev-smil-' + inv + '.svg');
+    fs.writeFileSync(sfile, smil.text);
+    const sp = await browser.newPage({ viewport: { width: 1100, height: 520 } });
+    const serr = [];
+    sp.on('pageerror', (e) => serr.push(e.message));
+    await sp.goto('file://' + sfile);
+    assert.strictEqual(await sp.evaluate(() => !!document.querySelector('parsererror')), false, 'well-formed XML');
+    const dur = await sp.evaluate(() => parseFloat(document.querySelector('animate, animateTransform').getAttribute('dur')));
+    for (const f of [0.1, 0.5, 0.9]) {
+      await sp.evaluate((t) => { const s = document.documentElement; s.pauseAnimations(); s.setCurrentTime(t); }, f * dur);
+      const bx = await ap.locator('#scrub-hit').boundingBox();
+      await ap.mouse.click(bx.x + 10 + (bx.width - 20) * f, bx.y + bx.height / 2);
+      const sv = await sp.evaluate(() => ['crank-fill', 'rod-fill'].flatMap((id) => { const e = document.getElementById(id); return [e.x1.animVal.value, e.y1.animVal.value, e.x2.animVal.value, e.y2.animVal.value]; }));
+      const iv = await ap.evaluate(() => ['crank-fill', 'rod-fill'].flatMap((id) => ['x1', 'y1', 'x2', 'y2'].map((k) => parseFloat(document.getElementById(id).getAttribute(k)))));
+      sv.forEach((v, i) => assert.ok(Math.abs(v - iv[i]) < 0.5, `inversion ${inv}, ${(f * 100) | 0}% of a turn: no-script frame = interactive frame (${v.toFixed(2)} vs ${iv[i].toFixed(2)})`));
+    }
+    assert.deepStrictEqual(serr, [], 'no errors in the no-script file');
+    await sp.close();
+    if (inv === 1) { // it also animates when used as an <img> (where scripts never run)
+      fs.writeFileSync(require('path').join(os.tmpdir(), 'sharev-img.html'), `<body style="margin:0"><img id="i" src="sharev-smil-1.svg" width="1000"></body>`);
+      const ip = await browser.newPage({ viewport: { width: 1100, height: 520 } });
+      await ip.goto('file://' + require('path').join(os.tmpdir(), 'sharev-img.html'));
+      await ip.waitForTimeout(400);
+      const s1 = await ip.locator('#i').screenshot(); await ip.waitForTimeout(700); const s2 = await ip.locator('#i').screenshot();
+      assert.ok(!s1.equals(s2), 'the no-script SVG animates inside an <img>');
+      await ip.close();
+    }
     await ap.close();
   }
   await page.setViewportSize({ width: 1280, height: 800 });
