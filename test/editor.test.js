@@ -558,6 +558,44 @@ const SHOT = process.env.SHOT; // optional screenshot path
   const parsed = await page.evaluate((t) => { const d = new DOMParser().parseFromString(t, 'image/svg+xml'); return { err: !!d.querySelector('parsererror'), ids: [...d.querySelectorAll('g[id]')].map((g) => g.id) }; }, exp.text);
   assert.strictEqual(parsed.err, false, 'exported svg is well-formed XML');
   assert.ok(parsed.ids.includes('link-1-frame') && parsed.ids.includes('pins'), 'named groups: ' + parsed.ids.join(','));
+  // animated, interactive SVG export: open it standalone (scripts run), check the motion and every control
+  const fs = require('fs'), os = require('os');
+  for (const [preset, inv] of [['IC Engine', 1], ['Rotary Engine', 2], ['Quick Return', 3], ['Hand Pump', 4], ['Offset Engine', 1]]) {
+    await page.click(`#presets [data-p="${preset}"]`);
+    await page.evaluate(() => { window.__svgExport = null; });
+    await page.click('#btnExportAnim');
+    await page.waitForFunction(() => window.__svgExport);
+    const anim = await page.evaluate(() => window.__svgExport);
+    assert.ok(anim.name.endsWith('_animated.svg'), 'animated file name');
+    assert.ok(anim.text.includes('CONTROLS (bottom strip)') && anim.text.includes('HOW THIS SCRIPT WORKS') && (anim.text.match(/\/\*/g) || []).length > 15, 'animated export is commented');
+    const file = require('path').join(os.tmpdir(), 'sharev-anim-' + inv + '.svg');
+    fs.writeFileSync(file, anim.text);
+    const ap = await browser.newPage({ viewport: { width: 1100, height: 640 } });
+    const aerr = [];
+    ap.on('pageerror', (e) => aerr.push(e.message));
+    await ap.goto('file://' + file);
+    await ap.waitForTimeout(250);
+    const read = () => ap.evaluate(() => ({ th: document.getElementById('ro-theta').textContent, x: document.getElementById('ro-x').textContent, rod: ['crank-fill', 'rod-fill', 'frame-bar-fill'].map((id) => document.getElementById(id).getAttribute('x2') + document.getElementById(id).getAttribute('y2')).join('|') + document.getElementById('slider').getAttribute('transform') }));
+    const a0 = await read(); await ap.waitForTimeout(500); const a1 = await read();
+    assert.ok(a0.th !== a1.th && a0.rod !== a1.rod, `inversion ${inv}: it animates by itself (${a0.th} -> ${a1.th})`);
+    await ap.click('#btn-play');
+    const p0 = await read(); await ap.waitForTimeout(300); const p1 = await read();
+    assert.strictEqual(p0.th, p1.th, 'pause button stops it');
+    const sb = await ap.locator('#scrub-hit').boundingBox();
+    await ap.mouse.click(sb.x + sb.width / 2, sb.y + sb.height / 2);
+    assert.strictEqual((await read()).th, '180.0°', 'angle slider sets the crank angle');
+    const spb = await ap.locator('#speed-hit').boundingBox();
+    await ap.mouse.click(spb.x + spb.width - 10, spb.y + spb.height / 2);
+    assert.ok(parseInt(await ap.locator('#speed-text').textContent(), 10) > 90, 'speed slider: ' + await ap.locator('#speed-text').textContent());
+    await ap.click('#btn-dir');
+    assert.strictEqual(await ap.locator('#dir-text').textContent(), 'reverse');
+    await ap.click('#btn-play'); const q0 = await read(); await ap.waitForTimeout(300);
+    assert.notStrictEqual((await read()).th, q0.th, 'plays again (in reverse)');
+    await ap.keyboard.press('Space');
+    assert.ok(await ap.locator('#icon-play').getAttribute('display') !== 'none', 'Space pauses (play icon shown)');
+    assert.deepStrictEqual(aerr, [], 'no script errors in the exported file');
+    await ap.close();
+  }
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.click('#btnShow');
   assert.ok(await page.locator('#graphCard').isHidden());

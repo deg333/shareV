@@ -137,3 +137,10 @@ tabs: *The maths* (worked live), *Theory* (degrees of freedom, exact and approxi
 quick return, the four inversions, design rules) and *Pros & cons* (of the mechanism and of each inversion). **Export SVG** saves the current frame as a
 standalone, well-commented SVG (equations, inputs, values at that instant, the coordinate mapping and one named, explained `<g>` per layer).
 Windows open wide by default, scroll bars are dark with breathing room, and the graph dot is a fixed circle that moves smoothly every frame.
+
+**Animated SVG export** (Simulator → *⇩ Animated SVG*): a self-contained, interactive SVG of the current setup (any inversion, units,
+offset…). Open it in a browser and it plays by itself, with controls drawn into the file: play/pause (Space), forward/reverse, a speed slider
+(1–120 rpm), a crank-angle slider to scrub by hand, and arrow keys to step 1°. Live readouts show θ, φ, x and v. The file is heavily commented:
+a header explaining the controls, the equations and the file layout; every moving part is a named element; and a short, readable script
+(kinematics → inversion transform → move the elements → animation loop → control handlers) drives it. Browsers run the script when the
+file is opened directly; viewers that block SVG scripts (`<img>`, editors) show the exported still frame — use the plain *Export SVG* there.
