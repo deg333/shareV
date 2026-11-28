@@ -27,7 +27,7 @@ const SHOT = process.env.SHOT; // optional screenshot path
       capture: (m) => { (window.__caps = window.__caps || []).push(m); },
       saveFile: async (name, ext, filter, text) => { window.__svgExport = { name, ext, text }; return '/tmp/' + name; },
       getCaptureOpts: async () => ({ delay: 0, self: false }), setCaptureOpts: async (d, s) => { window.__cap = [d, s]; },
-      loadUi: async () => null, saveUi: async (j) => { window.__ui = j; }, exportUi: async (j) => { window.__export = j; return 'x.json'; }, importUi: async () => window.__import || null,
+      getSaveSettings: async () => window.__sv || { askWhereToSave: false, saveDir: 'C:/ShareV/Screenshots', monthFolders: true, monthPattern: '{yyyy}-{MM}', filePattern: '{name}_{yyyy}-{MM}-{dd}_{HH}-{mm}-{ss}' }, setSaveSettings: async (s) => { window.__sv = s; return s; }, previewSavePath: async (s) => s.saveDir + '/preview.svg', pickFolder: async () => 'D:/Shots', loadUi: async () => null, saveUi: async (j) => { window.__ui = j; }, exportUi: async (j) => { window.__export = j; return 'x.json'; }, importUi: async () => window.__import || null,
     };
   });
   await page.goto('file://' + path.join(__dirname, '..', 'src', 'editor', 'index.html'));
@@ -690,6 +690,23 @@ const SHOT = process.env.SHOT; // optional screenshot path
   await page.keyboard.press('F3');
   assert.ok(await page.locator('#sim').isVisible(), 'F3 opens it');
   await page.keyboard.press('F3');
+
+  // ---- Saving & file names dialog
+  await page.keyboard.press('Escape');
+  await page.click('#bSettings');
+  await page.click('#menu [data-act=saving]');
+  assert.ok(await page.locator('#saveDlg').isVisible(), 'save dialog opens');
+  assert.strictEqual(await page.inputValue('#svDir'), 'C:/ShareV/Screenshots');
+  assert.ok(await page.locator('#svMonth').isChecked());
+  await page.click('#svBrowse');
+  assert.strictEqual(await page.inputValue('#svDir'), 'D:/Shots');
+  assert.ok((await page.textContent('#svPreview')).startsWith('D:/Shots'), 'preview follows folder');
+  await page.fill('#svFilePat', 'Shot_{n}');
+  await page.uncheck('#svMonth');
+  await page.click('#svSave');
+  assert.ok(await page.locator('#saveDlg').isHidden());
+  const sv = await page.evaluate(() => window.__sv);
+  assert.strictEqual(sv.saveDir, 'D:/Shots'); assert.strictEqual(sv.filePattern, 'Shot_{n}'); assert.strictEqual(sv.monthFolders, false);
 
   if (SHOT) { await page.keyboard.press('Escape'); await page.screenshot({ path: SHOT }); }
   assert.deepStrictEqual(errors, [], 'no page errors');

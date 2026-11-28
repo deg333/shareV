@@ -162,3 +162,6 @@ Viewers that cannot run scripts (an `<img>` tag, Inkscape) show only the fallbac
 **Quick Return preset = Whitworth (2nd inversion)**: crank r = 80 mm (3.15 in) fixed, rod l = 143 mm (5.63 in), 15 rpm, N = 1.79, time ratio 2.215.
 In the 2nd inversion an **INPUT** switch picks what turns uniformly: *link 3 · A* (Whitworth quick return, the preset) or *link 1 · O₂* (Gnome rotary engine).
 With link 3 turning about A the uniformly turning angle is β = θ + φ, so the time ratio is `(180° + 2α)/(180° − 2α)` with `sin α = r/l`.
+
+## Saving & file names
+Saving no longer asks where to put the file. Files go to the default folder (`ShareV-Data/Screenshots` unless changed), inside a sub-folder per month (`2026-11`). Open **Settings ▸ Saving & file names…** to change the default folder, turn month folders off, edit the month-folder and file-name patterns (tokens `{name} {yyyy} {MM} {MMM} {MMMM} {dd} {HH} {mm} {ss} {n}`), or switch "Ask where to save every time" back on. Existing names get " (2)", " (3)"… appended. Ctrl+S on an already-saved file overwrites it; Save As always asks.

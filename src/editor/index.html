@@ -152,11 +152,30 @@
   </div>
 </div>
 <div id="menu" hidden>
+  <button data-act="saving">Saving &amp; file names…</button>
   <button data-act="export">Export settings…</button>
   <button data-act="import">Import settings…</button>
   <button data-act="bake" id="bakeBtn">Burn blur / pixelate into saved image</button>
   <button data-act="reset">Reset tool options to defaults</button>
   <div class="note">Tool colours and options are saved automatically in <code>ShareV-Data/ui-settings.json</code>.</div>
+</div>
+<div id="saveDlg" hidden>
+  <div class="card" role="dialog" aria-label="Saving and file names">
+    <button class="x" id="saveClose" title="Close (Esc)">&times;</button>
+    <h2>Saving &amp; file names</h2>
+    <label class="chk"><input type="checkbox" id="svAsk"> Ask where to save every time</label>
+    <label>Default folder</label>
+    <div class="line"><input type="text" id="svDir" spellcheck="false"><button id="svBrowse">Browse…</button></div>
+    <label class="chk"><input type="checkbox" id="svMonth"> Put files in a sub-folder per month</label>
+    <label>Month folder name</label>
+    <input type="text" id="svMonthPat" spellcheck="false">
+    <label>File name (without extension)</label>
+    <input type="text" id="svFilePat" spellcheck="false">
+    <div class="hint">Tokens: <code>{name}</code> <code>{yyyy}</code> <code>{yy}</code> <code>{MM}</code> <code>{MMM}</code> <code>{MMMM}</code> <code>{dd}</code> <code>{ddd}</code> <code>{dddd}</code> <code>{HH}</code> <code>{mm}</code> <code>{ss}</code> <code>{n}</code>. If the name already exists, " (2)", " (3)"… is added unless the pattern has <code>{n}</code>.</div>
+    <div class="hint">Next file: <code id="svPreview"></code></div>
+    <div class="err" id="svErr"></div>
+    <div class="line end"><button id="svDefaults">Defaults</button><button id="svSave" class="primary">Save</button></div>
+  </div>
 </div>
 <div id="help" hidden>
   <div class="card" role="dialog" aria-label="Keyboard shortcuts">

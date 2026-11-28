@@ -1680,6 +1680,7 @@ menu.addEventListener('click', (e) => guard(async () => {
   const act = e.target.closest('button') && e.target.closest('button').dataset.act;
   if (!act) return;
   menu.hidden = true;
+  if (act === 'saving') { openSaveDlg(); return; }
   if (act === 'export') { const f = await window.api.exportUi(settingsJson()); if (f) flash('Settings exported to ' + f); }
   else if (act === 'import') {
     const txt = await window.api.importUi();
@@ -1689,6 +1690,29 @@ menu.addEventListener('click', (e) => guard(async () => {
     flash(state.bakeFx ? 'Blur/pixelate will be burned into saved files (original pixels removed)' : 'Blur/pixelate kept editable - the original unblurred screenshot stays inside the SVG!');
   } else if (act === 'reset') { applySettings({}); persistOpts(); flash('Tool options reset to defaults'); }
 }));
+// ------------------------------------------------------------------ "Saving & file names" dialog
+const SV_DEFAULTS = { askWhereToSave: false, monthFolders: true, monthPattern: '{yyyy}-{MM}', filePattern: '{name}_{yyyy}-{MM}-{dd}_{HH}-{mm}-{ss}' };
+const svForm = () => ({ askWhereToSave: $('svAsk').checked, saveDir: $('svDir').value, monthFolders: $('svMonth').checked, monthPattern: $('svMonthPat').value, filePattern: $('svFilePat').value });
+function svFill(s) {
+  $('svAsk').checked = !!s.askWhereToSave; $('svDir').value = s.saveDir || ''; $('svMonth').checked = !!s.monthFolders;
+  $('svMonthPat').value = s.monthPattern || ''; $('svFilePat').value = s.filePattern || ''; svSync();
+}
+async function svSync() {
+  $('svMonthPat').disabled = !$('svMonth').checked;
+  try { $('svPreview').textContent = await window.api.previewSavePath(svForm()); } catch (e) { $('svPreview').textContent = ''; }
+}
+async function openSaveDlg() { $('svErr').textContent = ''; svFill(await window.api.getSaveSettings()); $('saveDlg').hidden = false; }
+const closeSaveDlg = () => { $('saveDlg').hidden = true; };
+for (const id of ['svAsk', 'svDir', 'svMonth', 'svMonthPat', 'svFilePat']) $(id).addEventListener('input', svSync);
+$('saveClose').onclick = closeSaveDlg;
+$('saveDlg').addEventListener('mousedown', (e) => { if (e.target === $('saveDlg')) closeSaveDlg(); });
+$('saveDlg').addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeSaveDlg(); e.stopPropagation(); } });
+$('svBrowse').onclick = () => guard(async () => { const d = await window.api.pickFolder(); if (d) { $('svDir').value = d; svSync(); } });
+$('svDefaults').onclick = () => { svFill({ ...svForm(), ...SV_DEFAULTS }); };
+$('svSave').onclick = async () => {
+  try { await window.api.setSaveSettings(svForm()); closeSaveDlg(); flash('Save settings updated'); }
+  catch (e) { $('svErr').textContent = String((e && e.message) || e); }
+};
 const toggleHelp = (on) => { help.hidden = on === undefined ? !help.hidden : !on; };
 $('bHelp').onclick = () => toggleHelp();
 $('helpClose').onclick = () => toggleHelp(false);

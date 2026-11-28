@@ -58,7 +58,10 @@ struct LastRegion {
     h: u32,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+const DEFAULT_FILE_PATTERN: &str = "{name}_{yyyy}-{MM}-{dd}_{HH}-{mm}-{ss}";
+const DEFAULT_MONTH_PATTERN: &str = "{yyyy}-{MM}";
+
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(default, rename_all = "camelCase")]
 struct Settings {
     hotkeys: Hotkeys,
@@ -69,6 +72,29 @@ struct Settings {
     capture_delay: u32,
     /// keep ShareV's own windows visible so they can be captured too
     capture_self: bool,
+    /// show a "Save as" dialog every time (false = save straight into the folder below)
+    ask_where_to_save: bool,
+    /// put files in a sub-folder named by `month_pattern` (e.g. 2026-11)
+    month_folders: bool,
+    month_pattern: String,
+    /// file name without extension, built from tokens such as {name} {yyyy} {MM} {dd} {HH} {mm} {ss} {n}
+    file_pattern: String,
+}
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            hotkeys: Hotkeys::default(),
+            save_dir: None,
+            copy_to_clipboard: false,
+            last_region: None,
+            capture_delay: 0,
+            capture_self: false,
+            ask_where_to_save: false,
+            month_folders: true,
+            month_pattern: DEFAULT_MONTH_PATTERN.into(),
+            file_pattern: DEFAULT_FILE_PATTERN.into(),
+        }
+    }
 }
 
 struct Editor {
@@ -141,9 +167,68 @@ fn resolve_data_dir(app: &tauri::App) -> PathBuf {
     d
 }
 
-fn stamp() -> String {
-    chrono::Local::now().format("ShareV_%Y-%m-%d_%H-%M-%S").to_string()
+// ------------------------------------------------------------------ where and under what name files are saved
+/// Replace the tokens of a name pattern. Longer tokens first so {MMMM} is not eaten by {MMM} or {MM}.
+fn expand(pattern: &str, name: &str, n: u32) -> String {
+    let now = chrono::Local::now();
+    let f = |fmt: &str| now.format(fmt).to_string();
+    let mut s = pattern.to_string();
+    for (tok, val) in [
+        ("{MMMM}", f("%B")), ("{MMM}", f("%b")), ("{MM}", f("%m")), ("{yyyy}", f("%Y")), ("{yy}", f("%y")),
+        ("{dddd}", f("%A")), ("{ddd}", f("%a")), ("{dd}", f("%d")), ("{HH}", f("%H")), ("{mm}", f("%M")), ("{ss}", f("%S")),
+        ("{name}", name.to_string()), ("{n}", n.to_string()),
+    ] {
+        s = s.replace(tok, &val);
+    }
+    s
 }
+/// One path component made safe for every file system (no separators or reserved characters, no trailing dots).
+fn clean(s: &str) -> String {
+    let o: String = s.chars().map(|c| if c.is_control() || "<>:\"/\\|?*".contains(c) { '_' } else { c }).collect();
+    let o: String = o.trim().trim_end_matches('.').chars().take(100).collect();
+    if o.is_empty() { "_".into() } else { o }
+}
+/// base folder + month sub-folder(s) (not created here)
+fn target_dir(s: &Settings, base: &Path, name: &str) -> PathBuf {
+    let mut dir = base.to_path_buf();
+    if s.month_folders {
+        let pat = if s.month_pattern.trim().is_empty() { DEFAULT_MONTH_PATTERN } else { &s.month_pattern };
+        for comp in expand(pat, name, 1).split(|c| c == '/' || c == '\\') {
+            let c = comp.trim();
+            if !c.is_empty() && c != "." && c != ".." {
+                dir.push(clean(c));
+            }
+        }
+    }
+    dir
+}
+fn file_stem(s: &Settings, name: &str, n: u32) -> String {
+    let pat = if s.file_pattern.trim().is_empty() { DEFAULT_FILE_PATTERN } else { &s.file_pattern };
+    clean(&expand(pat, name, n))
+}
+/// Pick (and create the folder for) the next free file name. A pattern without {n} gets " (2)", " (3)" ... when the name is taken.
+fn auto_path(sh: &Shared, name: &str, ext: &str) -> Result<PathBuf, String> {
+    let s = sh.settings.lock().unwrap().clone();
+    let dir = target_dir(&s, &save_dir(sh), name);
+    fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    let numbered = s.file_pattern.contains("{n}");
+    for n in 1..100_000u32 {
+        let stem = file_stem(&s, name, n);
+        let cand = if numbered || n == 1 { dir.join(format!("{stem}.{ext}")) } else { dir.join(format!("{stem} ({n}).{ext}")) };
+        if !cand.exists() {
+            return Ok(cand);
+        }
+    }
+    Err("no free file name".into())
+}
+/// folder + file name offered by a "Save as" dialog (nothing is created)
+fn dialog_defaults(sh: &Shared, name: &str, ext: &str) -> (PathBuf, String) {
+    let s = sh.settings.lock().unwrap().clone();
+    let base = save_dir(sh);
+    let dir = target_dir(&s, &base, name);
+    (if dir.exists() { dir } else { base }, format!("{}.{ext}", file_stem(&s, name, 1)))
+}
+
 
 // ------------------------------------------------------------------ image helpers
 fn png_url(img: &RgbaImage) -> Result<String, String> {
@@ -482,18 +567,14 @@ async fn editor_title(window: WebviewWindow, title: String) {
 async fn save_svg(app: AppHandle, window: WebviewWindow, svg: String, save_as: bool) -> Result<Option<String>, String> {
     let label = window.label().to_string();
     let existing = shared(&app).editors.lock().unwrap().get(&label).and_then(|e| e.path.clone());
+    let ask = shared(&app).settings.lock().unwrap().ask_where_to_save;
     let target = match existing {
-        Some(p) if !save_as => p,
-        _ => {
-            let dir = save_dir(&shared(&app));
+        Some(p) if !save_as => p, // Ctrl+S on a file that already has a path simply overwrites it
+        _ if save_as || ask => {
+            let (dir, file) = dialog_defaults(&shared(&app), "ShareV", "svg");
             let a = app.clone();
             let picked = blocking(move || {
-                a.dialog()
-                    .file()
-                    .add_filter("SVG image", &["svg"])
-                    .set_directory(dir)
-                    .set_file_name(format!("{}.svg", stamp()))
-                    .blocking_save_file()
+                a.dialog().file().add_filter("SVG image", &["svg"]).set_directory(dir).set_file_name(file).blocking_save_file()
             })
             .await?;
             match picked.and_then(|p| p.into_path().ok()) {
@@ -501,6 +582,7 @@ async fn save_svg(app: AppHandle, window: WebviewWindow, svg: String, save_as: b
                 None => return Ok(None),
             }
         }
+        _ => auto_path(&shared(&app), "ShareV", "svg")?, // first save: straight into the (month) folder, no dialog
     };
     fs::write(&target, svg).map_err(|e| e.to_string())?;
     if let Some(e) = shared(&app).editors.lock().unwrap().get_mut(&label) {
@@ -511,18 +593,16 @@ async fn save_svg(app: AppHandle, window: WebviewWindow, svg: String, save_as: b
 
 #[tauri::command]
 async fn export_png(app: AppHandle, data_url: String) -> Result<Option<String>, String> {
-    let dir = save_dir(&shared(&app));
-    let a = app.clone();
-    let picked = blocking(move || {
-        a.dialog()
-            .file()
-            .add_filter("PNG image", &["png"])
-            .set_directory(dir)
-            .set_file_name(format!("{}.png", stamp()))
-            .blocking_save_file()
-    })
-    .await?;
-    let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    let ask = shared(&app).settings.lock().unwrap().ask_where_to_save;
+    let path = if ask {
+        let (dir, file) = dialog_defaults(&shared(&app), "ShareV", "png");
+        let a = app.clone();
+        let picked = blocking(move || a.dialog().file().add_filter("PNG image", &["png"]).set_directory(dir).set_file_name(file).blocking_save_file()).await?;
+        let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+        path
+    } else {
+        auto_path(&shared(&app), "ShareV", "png")?
+    };
     fs::write(&path, decode_url(&data_url)?).map_err(|e| e.to_string())?;
     Ok(Some(path.to_string_lossy().into_owned()))
 }
@@ -771,24 +851,88 @@ async fn set_capture_opts(app: AppHandle, delay: u32, include_self: bool) {
     save_settings(&shared(&app));
 }
 
-/// Generic "save this text as a file" (used by the simulator's SVG export).
+/// Generic "save this text as a file" (the simulator's SVG exports). `default_name` supplies {name} for the file-name pattern.
 #[tauri::command]
 async fn save_text_file(app: AppHandle, default_name: String, ext: String, filter_name: String, content: String) -> Result<Option<String>, String> {
-    let dir = save_dir(&shared(&app));
-    let a = app.clone();
-    let ext2 = ext.clone();
-    let picked = blocking(move || {
-        a.dialog()
-            .file()
-            .add_filter(filter_name, &[ext2.as_str()])
-            .set_directory(dir)
-            .set_file_name(default_name)
-            .blocking_save_file()
-    })
-    .await?;
-    let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    let name = Path::new(&default_name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "ShareV".into());
+    let ask = shared(&app).settings.lock().unwrap().ask_where_to_save;
+    let path = if ask {
+        let (dir, file) = dialog_defaults(&shared(&app), &name, &ext);
+        let a = app.clone();
+        let ext2 = ext.clone();
+        let picked = blocking(move || a.dialog().file().add_filter(filter_name, &[ext2.as_str()]).set_directory(dir).set_file_name(file).blocking_save_file()).await?;
+        let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+        path
+    } else {
+        auto_path(&shared(&app), &name, &ext)?
+    };
     fs::write(&path, content).map_err(|e| e.to_string())?;
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+// ------------------------------------------------------------------ "Saving & file names" settings
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SaveSettings {
+    ask_where_to_save: bool,
+    save_dir: String,
+    month_folders: bool,
+    month_pattern: String,
+    file_pattern: String,
+}
+fn save_view(sh: &Shared) -> SaveSettings {
+    let s = sh.settings.lock().unwrap().clone();
+    SaveSettings {
+        ask_where_to_save: s.ask_where_to_save,
+        save_dir: s.save_dir.clone().unwrap_or_else(|| sh.data_dir.join("Screenshots").to_string_lossy().into_owned()),
+        month_folders: s.month_folders,
+        month_pattern: s.month_pattern,
+        file_pattern: s.file_pattern,
+    }
+}
+#[tauri::command]
+async fn get_save_settings(app: AppHandle) -> SaveSettings {
+    save_view(&shared(&app))
+}
+#[tauri::command]
+async fn set_save_settings(app: AppHandle, settings: SaveSettings) -> Result<SaveSettings, String> {
+    let dir = settings.save_dir.trim().to_string();
+    if !dir.is_empty() {
+        fs::create_dir_all(&dir).map_err(|e| format!("cannot use folder {dir}: {e}"))?; // fail early if it is not writable
+    }
+    {
+        let sh = shared(&app);
+        let mut s = sh.settings.lock().unwrap();
+        let default_dir = sh.data_dir.join("Screenshots").to_string_lossy().into_owned();
+        s.save_dir = if dir.is_empty() || dir == default_dir { None } else { Some(dir) };
+        s.ask_where_to_save = settings.ask_where_to_save;
+        s.month_folders = settings.month_folders;
+        s.month_pattern = if settings.month_pattern.trim().is_empty() { DEFAULT_MONTH_PATTERN.into() } else { settings.month_pattern };
+        s.file_pattern = if settings.file_pattern.trim().is_empty() { DEFAULT_FILE_PATTERN.into() } else { settings.file_pattern };
+    }
+    save_settings(&shared(&app));
+    Ok(save_view(&shared(&app)))
+}
+/// what the next file would be called with the given (not yet saved) settings - for the live preview in the dialog
+#[tauri::command]
+async fn preview_save_path(app: AppHandle, settings: SaveSettings) -> String {
+    let sh = shared(&app);
+    let s = Settings {
+        month_folders: settings.month_folders,
+        month_pattern: settings.month_pattern,
+        file_pattern: settings.file_pattern,
+        ..Settings::default()
+    };
+    let base = if settings.save_dir.trim().is_empty() { sh.data_dir.join("Screenshots") } else { PathBuf::from(settings.save_dir.trim()) };
+    let dir = target_dir(&s, &base, "ShareV");
+    dir.join(format!("{}.svg", file_stem(&s, "ShareV", 1))).to_string_lossy().into_owned()
+}
+#[tauri::command]
+async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
+    let dir = save_dir(&shared(&app));
+    let a = app.clone();
+    let picked = blocking(move || a.dialog().file().set_directory(dir).blocking_pick_folder()).await?;
+    Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
@@ -1106,7 +1250,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             capture, editor_init, editor_state, editor_title, save_svg, export_png, copy_png, open_file,
-            open_folder, overlay_init, overlay_ready, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text, save_text_file, get_hotkeys, get_capture_opts, set_capture_opts, emoji_list, emoji_save, emoji_delete, emoji_import
+            open_folder, overlay_init, overlay_ready, overlay_done, ui_load, ui_save, ui_export, ui_import, ocr, copy_text, save_text_file, get_save_settings, set_save_settings, preview_save_path, pick_folder, get_hotkeys, get_capture_opts, set_capture_opts, emoji_list, emoji_save, emoji_delete, emoji_import
         ])
         .setup(|app| {
             let data_dir = resolve_data_dir(app);
